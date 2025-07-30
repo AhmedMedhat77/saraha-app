@@ -565,10 +565,10 @@ export const resetPassword = async (req: Request, res: Response) => {
 
 export const deleteProfile = async (req: Request, res: Response) => {
   try {
-    const { _id } = req.user as { _id: string };
+    const { _id } = req.user!;
 
     if (!_id) {
-      throw new AppError('User ID is required', 400);
+      throw new AppError('User not authenticated or invalid user data', 401);
     }
 
     const userExists = await User.findOne({ _id });

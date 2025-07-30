@@ -10,7 +10,6 @@ export default function bootstrap(app: Express): void {
   // Connect to database
   connectDB();
 
-
   // Initialize middleware
   app.use(cors({ origin: '*' }));
   app.use(json());
