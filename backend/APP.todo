@@ -1,0 +1,33 @@
+[*] project file structure
+[*] integrate with DB 
+[*] add register logic with email and phone
+[*] add register logic with google 
+[*] add login logic with email and phone
+[*] add OTP verification
+[*] Send email verification
+[*] Resend OTP verification
+[*] add reset password logic
+[*] email send function 
+[*] TOKEN generator UTIL 
+[*] TOKEN verifier UTIL 
+[*] OTP generator UTIL 
+[*] refresh token logic 
+[*] Generate Token 
+[*] hash password 
+
+
+[x] logout
+[x] destroy token 
+
+[x] add login logic with google
+
+[x] forget password logic 
+[x] reset password 
+
+[x] global error handler (Partially done)
+[x] async handler 
+
+[x] Delete profile 
+[x] get profile 
+[x] update profile 
+[x] upload profile image
