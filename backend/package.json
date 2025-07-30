@@ -15,15 +15,20 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
+    "express-validator": "^7.2.1",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.16.5",
     "nodemailer": "^7.0.5"
   },
   "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^4.17.12",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.1.0",
+    "@types/nodemailer": "^6.4.17",
     "dotenv": "^17.2.1",
     "eslint": "^9.32.0",
     "express": "^5.1.0",

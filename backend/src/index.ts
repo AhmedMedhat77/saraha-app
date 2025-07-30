@@ -1,7 +1,7 @@
-import express from 'express';
+import express, { Express } from 'express';
 import bootstrap from './app.controller';
 
-const app = express();
+const app: Express = express();
 
 bootstrap(app);
 

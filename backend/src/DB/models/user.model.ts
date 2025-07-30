@@ -33,6 +33,7 @@ const schema = new Schema<IUser>(
     email: {
       type: String,
       trim: true,
+      lowercase: true,
     },
     phone: {
       type: String,
@@ -44,9 +45,27 @@ const schema = new Schema<IUser>(
         return this.platform === 'local';
       },
     },
+    fullName: {
+      type: String,
+      virtual: true,
+      get: function (this: IUser) {
+        return `${this.firstName} ${this.lastName}`;
+      },
+      set: function (this: IUser) {
+        this.fullName = this.firstName + ' ' + this.lastName;
+      },
+    },
+    age: {
+      type: Number,
+      virtual: true,
+      get: function (this: IUser) {
+        if (!this.dob) return null;
+        const ageDiff = Date.now() - this.dob.getTime();
+        return Math.floor(ageDiff / (1000 * 60 * 60 * 24 * 365.25));
+      },
+    },
     avatar: {
       type: String,
-      required: true,
     },
     otp: {
       type: String,
@@ -78,28 +97,22 @@ const schema = new Schema<IUser>(
     timestamps: true,
     toJSON: { virtuals: true },
     toObject: { virtuals: true },
-  }
+  },
 );
 
 //  Ensure at least one of email or phone is present
 schema.pre('validate', function (next) {
   if (this.platform === 'local' && !this.email && !this.phone) {
-    this.invalidate('email', 'Either email or phone is required for local signups.');
-    this.invalidate('phone', 'Either phone or email is required for local signups.');
+    this.invalidate(
+      'email',
+      'Either email or phone is required for local signups.',
+    );
+    this.invalidate(
+      'phone',
+      'Either phone or email is required for local signups.',
+    );
   }
   next();
-});
-
-//  Virtual for fullName
-schema.virtual('fullName').get(function (this: IUser) {
-  return `${this.firstName} ${this.lastName}`;
-});
-
-// Virtual for age
-schema.virtual('age').get(function (this: IUser) {
-  if (!this.dob) return null;
-  const ageDiff = Date.now() - this.dob.getTime();
-  return Math.floor(ageDiff / (1000 * 60 * 60 * 24 * 365.25));
 });
 
 export const User = model<IUser>('User', schema);
