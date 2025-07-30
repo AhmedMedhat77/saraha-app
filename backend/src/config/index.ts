@@ -9,7 +9,7 @@ interface Config {
   tokenSecret: string;
   emailUser: string;
   emailPassword: string;
-  emailAuth: string;
+  googleClientId: string;
 }
 
 const config: Config = {
@@ -19,7 +19,7 @@ const config: Config = {
   tokenSecret: process.env.TOKEN_SECRET || 'secret',
   emailUser: process.env.EMAIL_USER || '',
   emailPassword: process.env.EMAIL_PASSWORD || '',
-  emailAuth: process.env.GOOGLE_AUTH_CLIENT || '',
+  googleClientId: process.env.GOOGLE_AUTH_CLIENT || '',
 };
 
 export default config;

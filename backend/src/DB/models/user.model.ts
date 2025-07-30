@@ -12,6 +12,7 @@ interface IUser extends Document {
   isVerified: boolean;
   platform: 'local' | 'google';
   dob?: Date;
+  googleId?: string;
   fullName?: string;
   age?: number;
   refreshToken?: string;
@@ -63,6 +64,9 @@ const schema = new Schema<IUser>(
         const ageDiff = Date.now() - this.dob.getTime();
         return Math.floor(ageDiff / (1000 * 60 * 60 * 24 * 365.25));
       },
+      set: function (this: IUser) {
+        this.age = this.dob ? Math.floor((Date.now() - this.dob.getTime()) / (1000 * 60 * 60 * 24 * 365.25)) : undefined;
+      },
     },
     avatar: {
       type: String,
@@ -83,6 +87,13 @@ const schema = new Schema<IUser>(
       type: String,
       enum: ['local', 'google'],
       default: 'local',
+    },
+    googleId: {
+      type: String,
+      default: null,
+      required: function (this: IUser) {
+        return this.platform === 'google';
+      },
     },
     dob: {
       type: Date,

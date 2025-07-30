@@ -5,7 +5,9 @@ import { generateOTP } from '../../utils/otp';
 import { sendEmail } from '../../utils/email';
 import { body } from 'express-validator';
 import bcrypt from 'bcrypt';
-
+import { generateToken } from '../../utils/token';
+import { OAuth2Client } from 'google-auth-library';
+import config from '../../config';
 /*
 #Steps 
 1. Validate the request body
@@ -18,6 +20,7 @@ import bcrypt from 'bcrypt';
 3. User can Login with email or Phone 
 4. Send email 
 5. verify OTP 
+6. Register with google 
 
 */
 
@@ -117,6 +120,70 @@ export const register = async (req: Request, res: Response) => {
   }
 };
 
+export const registerWithGoogle = async (req: Request, res: Response) => {
+  try {
+    const { idToken } = req.body;
+
+    if (!idToken) {
+      throw new AppError('Google token is required', 400);
+    }
+
+    const oauth2Client = new OAuth2Client();
+    const ticket = await oauth2Client.verifyIdToken({
+      idToken,
+      audience: config.googleClientId,
+    });
+    const payload = ticket.getPayload();
+    if (!payload) {
+      throw new AppError('Invalid Google token', 401);
+    }
+    const { email, name, picture } = payload;
+
+    const userExists = await User.findOne({ email });
+
+    if (userExists) {
+      throw new AppError('User already exists', 409);
+    }
+
+    const newUser = new User({
+      email,
+      fullName: name,
+      avatar: picture,
+      platform: 'google',
+      googleId: payload.sub,
+      isVerified: true,
+    });
+
+    const newUserSaved = await newUser.save();
+    const token = generateToken(
+      { _id: newUserSaved._id },
+      { expiresIn: '10m' },
+    );
+    const refreshToken = generateToken(
+      { _id: newUserSaved._id },
+      { expiresIn: '7d' },
+    );
+    // Add refresh token to user
+    newUserSaved.refreshToken = refreshToken;
+    await newUserSaved.save();
+
+    const {
+      password: userPassword,
+      refreshToken: userRefreshToken,
+      ...user
+    } = newUserSaved.toObject();
+
+    return res.status(200).json({ token, refreshToken, user });
+  } catch (error: any) {
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+    return res
+      .status(500)
+      .json({ message: error.message || 'Internal Server Error' });
+  }
+};
+
 /*
 1- get Email and OTP from req.body
 2- find user by email and check the OTP 
@@ -168,6 +235,119 @@ export const verifyAccount = async (req: Request, res: Response) => {
       return res.status(error.statusCode).json({ message: error.message });
     }
 
+    return res
+      .status(500)
+      .json({ message: error.message || 'Internal Server Error' });
+  }
+};
+
+/*
+1. get email from body 
+2. check existence of email 
+3. if user exists and isVerified is true → throw error 
+4. if user exists and isVerified is false → generate OTP and send email 
+
+*/
+export const resendOTP = async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      throw new AppError('Email is required', 400);
+    }
+
+    const userExists = await User.findOne({ email });
+
+    if (!userExists) {
+      throw new AppError('User not found', 404);
+    }
+    if (userExists && userExists.isVerified) {
+      throw new AppError('User is already verified', 409);
+    }
+
+    const { otp, otpExpiry } = generateOTP(5);
+
+    userExists.otp = otp;
+    userExists.otpExpiry = otpExpiry;
+    await userExists.save();
+
+    await sendEmail({
+      to: userExists.email!,
+      subject: 'OTP Verification',
+      text: `Your OTP is ${otp}`,
+    });
+
+    return res.status(200).json({ message: 'OTP sent to your email.' });
+  } catch (error: any) {
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+    return res
+      .status(500)
+      .json({ message: error.message || 'Internal Server Error' });
+  }
+};
+
+/*
+Login with email or phone or google 
+1- get Email and OTP from req.body
+2- find the user by email or phone 
+3- check if user is verified 
+4- check the registration platform 
+5- if local compare password 
+6- if google compare googleId 
+7- generate token and refresh token 
+8- return token and refresh token 
+*/
+
+export const login = async (req: Request, res: Response) => {
+  try {
+    const { email, phone, password, googleId } = req.body;
+
+    const userExists = await User.findOne({ $or: [{ email }, { phone }] });
+
+    if (!userExists) {
+      throw new AppError('User not found', 404);
+    }
+
+    if (!userExists.isVerified) {
+      throw new AppError('User is not verified', 401);
+    }
+
+    if (
+      userExists.platform === 'local' &&
+      !bcrypt.compare(password, userExists.password!)
+    ) {
+      throw new AppError('Invalid password', 401);
+    }
+
+    if (userExists.platform === 'google' && userExists.googleId !== googleId) {
+      throw new AppError('Invalid googleId', 401);
+    }
+
+    const token = generateToken({ _id: userExists._id }, { expiresIn: '10m' });
+    const refreshToken = generateToken(
+      { _id: userExists._id },
+      { expiresIn: '7d' },
+    );
+
+    userExists.refreshToken = refreshToken;
+    await userExists.save();
+
+    const {
+      password: userPassword,
+      refreshToken: userRefreshToken,
+      otp,
+      otpExpiry,
+      googleId: userGoogleId,
+      ...user
+    } = userExists.toObject();
+    console.log(user.age);
+    return res.status(200).json({ token, refreshToken, user });
+  } catch (error: any) {
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
     return res
       .status(500)
       .json({ message: error.message || 'Internal Server Error' });
