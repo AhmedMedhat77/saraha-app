@@ -2,19 +2,7 @@ import { NextFunction, Request, Response } from 'express';
 import { verifyToken } from '../../utils/token';
 import { generateToken } from '../../utils/token';
 import config from '../../config';
-
-// Extend Request type to include user
-declare global {
-  namespace Express {
-    interface Request {
-      user?: {
-        _id: string;
-        email?: string;
-        phone?: string;
-      };
-    }
-  }
-}
+import { AppError } from '../../utils/error/AppError';
 
 export const authenticateToken = async (
   req: Request,
@@ -35,11 +23,10 @@ export const authenticateToken = async (
     // Try verifying access token first
     if (accessToken) {
       const decoded = await verifyToken(accessToken);
-      req.user = decoded as {
-        _id: string;
-        email?: string;
-        phone?: string;
-      };
+      if (!decoded) {
+        throw new AppError('Invalid access token', 401);
+      }
+      req.user = decoded;
       return next();
     }
   } catch (accessError) {
@@ -61,18 +48,35 @@ export const authenticateToken = async (
       const user =
         'user' in decodedRefresh ? decodedRefresh.user : decodedRefresh;
 
+      // Define the expected user type from token
+      interface TokenUser {
+        _id: string;
+        email?: string;
+        phone?: string;
+      }
+
       // Ensure we have a valid user object with _id
-      if (!user || (typeof user === 'object' && !('_id' in user))) {
+      const tokenUser = user as TokenUser;
+      if (!tokenUser || typeof tokenUser !== 'object' || !tokenUser._id) {
         return res.status(403).send('Invalid user data in refresh token.');
       }
 
+      // Create a properly typed user payload
+      const userPayload: TokenUser = {
+        _id: tokenUser._id,
+      };
+      
+      // Add optional fields if they exist
+      if ('email' in tokenUser) userPayload.email = tokenUser.email;
+      if ('phone' in tokenUser) userPayload.phone = tokenUser.phone;
+
       const newAccessToken = generateToken(
-        { user },
+        { user: userPayload },
         { expiresIn: config.ACCESS_TOKEN_TIME },
       );
 
       res.setHeader('x-access-token', newAccessToken);
-      req.user = user;
+      req.user = userPayload;
       return next();
     } catch (refreshError) {
       return res.status(403).send('Invalid or expired refresh token.');

@@ -562,3 +562,33 @@ export const resetPassword = async (req: Request, res: Response) => {
     });
   }
 };
+
+export const deleteProfile = async (req: Request, res: Response) => {
+  try {
+    const { _id } = req.user as { _id: string };
+
+    if (!_id) {
+      throw new AppError('User ID is required', 400);
+    }
+
+    const userExists = await User.findOne({ _id });
+
+    if (!userExists) {
+      throw new AppError('User not found', 404);
+    }
+
+    await userExists.deleteOne();
+
+    return res.status(200).json({ success: true, message: 'User deleted' });
+  } catch (error: any) {
+    if (error instanceof AppError) {
+      return res
+        .status(error.statusCode)
+        .json({ success: false, message: error.message });
+    }
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Internal Server Error',
+    });
+  }
+};

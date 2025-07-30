@@ -11,4 +11,6 @@ router.post('/login', authService.login);
 router.put('/forgetPassword', authService.forgetPassword);
 router.put('/resetPassword', authService.resetPassword);
 
+router.delete('./deleteProfile', authService.deleteProfile);
+
 export default router;

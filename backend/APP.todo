@@ -14,6 +14,9 @@
 [*] refresh token logic 
 [*] Generate Token 
 [*] hash password 
+[*] Forget password
+[*] Reset password
+
 
 
 [x] logout
@@ -21,8 +24,7 @@
 
 [x] add login logic with google
 
-[x] forget password logic 
-[x] reset password 
+ 
 
 [x] global error handler (Partially done)
 [x] async handler 
