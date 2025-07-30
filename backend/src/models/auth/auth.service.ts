@@ -5,7 +5,7 @@ import { generateOTP } from '../../utils/otp';
 import { sendEmail } from '../../utils/email';
 import { body } from 'express-validator';
 import bcrypt from 'bcrypt';
-import { generateToken } from '../../utils/token';
+import { generateToken, verifyToken } from '../../utils/token';
 import { OAuth2Client } from 'google-auth-library';
 import config from '../../config';
 /*
@@ -109,14 +109,17 @@ export const register = async (req: Request, res: Response) => {
 
     return res
       .status(201)
-      .json({ message: 'User registered. OTP sent to email.' });
+      .json({ success: true, message: 'User registered. OTP sent to email.' });
   } catch (error: any) {
     if (error instanceof AppError) {
       return res.status(error.statusCode).json({ message: error.message });
     }
     return res
       .status(500)
-      .json({ message: error.message || 'Internal Server Error' });
+      .json({
+        success: false,
+        message: error.message || 'Internal Server Error',
+      });
   }
 };
 
@@ -156,12 +159,12 @@ export const registerWithGoogle = async (req: Request, res: Response) => {
 
     const newUserSaved = await newUser.save();
     const token = generateToken(
-      { _id: newUserSaved._id },
-      { expiresIn: '10m' },
+      { _id: newUserSaved._id, email: newUserSaved.email, phone: newUserSaved.phone },
+      { expiresIn: config.ACCESS_TOKEN_TIME },
     );
     const refreshToken = generateToken(
-      { _id: newUserSaved._id },
-      { expiresIn: '7d' },
+      { _id: newUserSaved._id, email: newUserSaved.email, phone: newUserSaved.phone },
+      { expiresIn: config.REFRESH_TOKEN_TIME },
     );
     // Add refresh token to user
     newUserSaved.refreshToken = refreshToken;
@@ -173,10 +176,12 @@ export const registerWithGoogle = async (req: Request, res: Response) => {
       ...user
     } = newUserSaved.toObject();
 
-    return res.status(200).json({ token, refreshToken, user });
+    return res.status(200).json({ success: true, token, refreshToken, user });
   } catch (error: any) {
     if (error instanceof AppError) {
-      return res.status(error.statusCode).json({ message: error.message });
+      return res
+        .status(error.statusCode)
+        .json({ success: false, message: error.message });
     }
     return res
       .status(500)
@@ -229,10 +234,14 @@ export const verifyAccount = async (req: Request, res: Response) => {
     user.otpExpiry = undefined;
     await user.save();
 
-    return res.status(200).json({ message: 'User verified successfully' });
+    return res
+      .status(200)
+      .json({ success: true, message: 'User verified successfully' });
   } catch (error: any) {
     if (error instanceof AppError) {
-      return res.status(error.statusCode).json({ message: error.message });
+      return res
+        .status(error.statusCode)
+        .json({ success: false, message: error.message });
     }
 
     return res
@@ -277,14 +286,21 @@ export const resendOTP = async (req: Request, res: Response) => {
       text: `Your OTP is ${otp}`,
     });
 
-    return res.status(200).json({ message: 'OTP sent to your email.' });
+    return res
+      .status(200)
+      .json({ success: true, message: 'OTP sent to your email.' });
   } catch (error: any) {
     if (error instanceof AppError) {
-      return res.status(error.statusCode).json({ message: error.message });
+      return res
+        .status(error.statusCode)
+        .json({ success: false, message: error.message });
     }
     return res
       .status(500)
-      .json({ message: error.message || 'Internal Server Error' });
+      .json({
+        success: false,
+        message: error.message || 'Internal Server Error',
+      });
   }
 };
 
@@ -327,8 +343,8 @@ export const login = async (req: Request, res: Response) => {
 
     const token = generateToken({ _id: userExists._id }, { expiresIn: '10m' });
     const refreshToken = generateToken(
-      { _id: userExists._id },
-      { expiresIn: '7d' },
+      { _id: userExists._id, email: userExists.email, phone: userExists.phone },
+      { expiresIn: config.REFRESH_TOKEN_TIME },
     );
 
     userExists.refreshToken = refreshToken;
@@ -342,14 +358,67 @@ export const login = async (req: Request, res: Response) => {
       googleId: userGoogleId,
       ...user
     } = userExists.toObject();
-    console.log(user.age);
-    return res.status(200).json({ token, refreshToken, user });
+
+    return res
+      .status(200)
+      .cookie('refreshToken', refreshToken, {
+        httpOnly: true,
+        sameSite: 'strict',
+      })
+      .json({ token, user, success: true });
   } catch (error: any) {
     if (error instanceof AppError) {
-      return res.status(error.statusCode).json({ message: error.message });
+      return res
+        .status(error.statusCode)
+        .json({ success: false, message: error.message });
     }
     return res
       .status(500)
-      .json({ message: error.message || 'Internal Server Error' });
+      .json({
+        success: false,
+        message: error.message || 'Internal Server Error',
+      });
+  }
+};
+
+// Refresh token
+
+export const refreshToken = async (req: Request, res: Response) => {
+  try {
+    const refreshToken = req.cookies['refreshToken'];
+
+    if (!refreshToken) {
+      throw new AppError('Refresh token is required', 401);
+    }
+
+    const decoded = (await verifyToken(refreshToken)) as { _id: string };
+
+    const user = await User.findById(decoded._id);
+
+    const accessToken = generateToken(
+      { _id: decoded._id , email: user?.email, phone: user?.phone },
+      { expiresIn: config.ACCESS_TOKEN_TIME },
+    );
+
+    return res
+      .status(201)
+      .header('Authorization', `Bearer ${accessToken}`)
+      .json({
+        user: { _id: decoded._id },
+        success: true,
+        message: 'Refresh token generated successfully',
+      });
+  } catch (error: any) {
+    if (error instanceof AppError) {
+      return res
+        .status(error.statusCode)
+        .json({ success: false, message: error.message });
+    }
+    return res
+      .status(500)
+      .json({
+        success: false,
+        message: error.message || 'Internal Server Error',
+      });
   }
 };

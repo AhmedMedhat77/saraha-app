@@ -1,26 +1,81 @@
-import { NextFunction, Request, Response } from "express";
-import { verifyToken } from "../../utils/token";
+import { NextFunction, Request, Response } from 'express';
+import { verifyToken } from '../../utils/token';
+import { generateToken } from '../../utils/token';
+import config from '../../config';
 
-export const authenticateToken = async (req: Request, res: Response, next: NextFunction) => {
+// Extend Request type to include user
+declare global {
+  namespace Express {
+    interface Request {
+      user?: {
+        _id: string;
+        email?: string;
+        phone?: string;
+      };
+    }
+  }
+}
+
+export const authenticateToken = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  const authHeader = req.headers['authorization'];
+  const accessToken = authHeader?.startsWith('Bearer ')
+    ? authHeader.split(' ')[1]
+    : null;
+  const refreshToken = req.cookies?.refreshToken;
+
+  if (!accessToken && !refreshToken) {
+    return res.status(401).send('Access denied. No token provided.');
+  }
+
   try {
-    const authHeader = req.headers.authorization;
-
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({ message: "Authorization token missing or malformed" });
+    // Try verifying access token first
+    if (accessToken) {
+      const decoded = await verifyToken(accessToken);
+      req.user = decoded as {
+        _id: string;
+        email?: string;
+        phone?: string;
+      };
+      return next();
+    }
+  } catch (accessError) {
+    // If access token is invalid or expired, try refresh
+    if (!refreshToken) {
+      return res
+        .status(401)
+        .send('Access token expired and no refresh token provided.');
     }
 
-    const token = authHeader.split(" ")[1];
-    const decoded = await verifyToken(token); // Assumes it returns the decoded payload
-    if (!decoded) {
-      return res.status(401).json({ message: "Invalid token" });
+    try {
+      const decodedRefresh = await verifyToken(refreshToken);
+
+      if (!decodedRefresh || typeof decodedRefresh === 'string') {
+        return res.status(403).send('Invalid refresh token.');
+      }
+
+      // Extract user from the decoded token
+      const user =
+        'user' in decodedRefresh ? decodedRefresh.user : decodedRefresh;
+
+      // Ensure we have a valid user object with _id
+      if (!user || (typeof user === 'object' && !('_id' in user))) {
+        return res.status(403).send('Invalid user data in refresh token.');
+      }
+
+      const newAccessToken = generateToken(
+        { user },
+        { expiresIn: config.ACCESS_TOKEN_TIME },
+      );
+
+      res.setHeader('x-access-token', newAccessToken);
+      req.user = user;
+      return next();
+    } catch (refreshError) {
+      return res.status(403).send('Invalid or expired refresh token.');
     }
-
-    // Attach decoded payload to request object (e.g. user ID, email, role, etc.)
-    req.user = decoded;
-
-    next();
-  } catch (error) {
-    console.error("JWT verification error:", error);
-    return res.status(401).json({ message: "Token verification failed" });
   }
 };

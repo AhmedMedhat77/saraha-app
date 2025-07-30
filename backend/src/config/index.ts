@@ -1,6 +1,8 @@
 import dotenv from 'dotenv';
+import { StringValue } from 'ms'; // You might need to install @types/ms
 
 dotenv.config();
+
 
 interface Config {
   port: number;
@@ -10,6 +12,8 @@ interface Config {
   emailUser: string;
   emailPassword: string;
   googleClientId: string;
+  ACCESS_TOKEN_TIME: StringValue;
+  REFRESH_TOKEN_TIME: StringValue;
 }
 
 const config: Config = {
@@ -20,6 +24,8 @@ const config: Config = {
   emailUser: process.env.EMAIL_USER || '',
   emailPassword: process.env.EMAIL_PASSWORD || '',
   googleClientId: process.env.GOOGLE_AUTH_CLIENT || '',
+  ACCESS_TOKEN_TIME: '10m',
+  REFRESH_TOKEN_TIME: '7d',
 };
 
 export default config;

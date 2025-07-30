@@ -13,7 +13,12 @@ const generateToken = (
 
 const verifyToken = async (
   token: string,
-): Promise<JwtPayload | string | null> => {
+): Promise<
+  | JwtPayload
+  | string
+  | null
+  | { user: { _id: string; email?: string; phone?: string } }
+> => {
   try {
     const decoded = jwt.verify(token, config.tokenSecret);
     return decoded;

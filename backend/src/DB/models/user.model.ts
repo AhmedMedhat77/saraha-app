@@ -65,7 +65,12 @@ const schema = new Schema<IUser>(
         return Math.floor(ageDiff / (1000 * 60 * 60 * 24 * 365.25));
       },
       set: function (this: IUser) {
-        this.age = this.dob ? Math.floor((Date.now() - this.dob.getTime()) / (1000 * 60 * 60 * 24 * 365.25)) : undefined;
+        this.age = this.dob
+          ? Math.floor(
+              (Date.now() - this.dob.getTime()) /
+                (1000 * 60 * 60 * 24 * 365.25),
+            )
+          : undefined;
       },
     },
     avatar: {
@@ -99,15 +104,9 @@ const schema = new Schema<IUser>(
       type: Date,
       default: null,
     },
-    refreshToken: {
-      type: String,
-      default: null,
-    },
   },
   {
     timestamps: true,
-    toJSON: { virtuals: true },
-    toObject: { virtuals: true },
   },
 );
 
