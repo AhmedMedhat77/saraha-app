@@ -114,12 +114,10 @@ export const register = async (req: Request, res: Response) => {
     if (error instanceof AppError) {
       return res.status(error.statusCode).json({ message: error.message });
     }
-    return res
-      .status(500)
-      .json({
-        success: false,
-        message: error.message || 'Internal Server Error',
-      });
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Internal Server Error',
+    });
   }
 };
 
@@ -159,11 +157,19 @@ export const registerWithGoogle = async (req: Request, res: Response) => {
 
     const newUserSaved = await newUser.save();
     const token = generateToken(
-      { _id: newUserSaved._id, email: newUserSaved.email, phone: newUserSaved.phone },
+      {
+        _id: newUserSaved._id,
+        email: newUserSaved.email,
+        phone: newUserSaved.phone,
+      },
       { expiresIn: config.ACCESS_TOKEN_TIME },
     );
     const refreshToken = generateToken(
-      { _id: newUserSaved._id, email: newUserSaved.email, phone: newUserSaved.phone },
+      {
+        _id: newUserSaved._id,
+        email: newUserSaved.email,
+        phone: newUserSaved.phone,
+      },
       { expiresIn: config.REFRESH_TOKEN_TIME },
     );
     // Add refresh token to user
@@ -295,12 +301,10 @@ export const resendOTP = async (req: Request, res: Response) => {
         .status(error.statusCode)
         .json({ success: false, message: error.message });
     }
-    return res
-      .status(500)
-      .json({
-        success: false,
-        message: error.message || 'Internal Server Error',
-      });
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Internal Server Error',
+    });
   }
 };
 
@@ -372,12 +376,10 @@ export const login = async (req: Request, res: Response) => {
         .status(error.statusCode)
         .json({ success: false, message: error.message });
     }
-    return res
-      .status(500)
-      .json({
-        success: false,
-        message: error.message || 'Internal Server Error',
-      });
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Internal Server Error',
+    });
   }
 };
 
@@ -396,7 +398,7 @@ export const refreshToken = async (req: Request, res: Response) => {
     const user = await User.findById(decoded._id);
 
     const accessToken = generateToken(
-      { _id: decoded._id , email: user?.email, phone: user?.phone },
+      { _id: decoded._id, email: user?.email, phone: user?.phone },
       { expiresIn: config.ACCESS_TOKEN_TIME },
     );
 
@@ -414,11 +416,149 @@ export const refreshToken = async (req: Request, res: Response) => {
         .status(error.statusCode)
         .json({ success: false, message: error.message });
     }
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Internal Server Error',
+    });
+  }
+};
+
+/*
+1. get email from body 
+2. find user by email 
+3. generate new Token with different key than regular one 
+4. generate link carrying this token 
+5. send email with this link 
+6. if user clicks on link 
+7. verify token 
+8. update password 
+*/
+
+export const forgetPassword = async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      throw new AppError('Email is required', 400);
+    }
+
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      throw new AppError('User not found', 404);
+    }
+
+    const resetToken = generateToken(
+      { _id: user._id, email: user.email },
+      { expiresIn: config.RESET_TOKEN_TIME },
+      config.resetTokenSecret,
+    );
+
+    const resetLink = `${config.clientURI}/${resetToken}`;
+
+    user.resetToken = resetToken;
+    await user.save();
+
+    await sendEmail({
+      to: user.email!,
+      subject: 'Reset Password',
+      text: `Click on the link to reset your password: ${resetLink}`,
+    });
+
     return res
-      .status(500)
-      .json({
-        success: false,
-        message: error.message || 'Internal Server Error',
-      });
+      .status(200)
+      .json({ success: true, message: 'Reset link sent to your email.' });
+  } catch (error: any) {
+    if (error instanceof AppError) {
+      return res
+        .status(error.statusCode)
+        .json({ success: false, message: error.message });
+    }
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Internal Server Error',
+    });
+  }
+};
+
+/*
+1. get email and password from req.body 
+2. find user by email 
+3. verify the link with db Link 
+4. update password 
+5. remove resetLink from user 
+6. generate token and refresh token 
+7. return token and refresh token 
+*/
+
+export const resetPassword = async (req: Request, res: Response) => {
+  try {
+    const { resetToken, password } = req.body;
+
+    if (!resetToken || !password) {
+      throw new AppError('Reset Token and password are required', 400);
+    }
+
+    const userExists = await User.findOne({ resetToken });
+
+    if (!userExists) {
+      throw new AppError('User not found', 404);
+    }
+
+    if (!userExists.resetToken) {
+      throw new AppError('user is not in reset mode', 409);
+    }
+
+    const decoded = await verifyToken(
+      userExists.resetToken!,
+      config.resetTokenSecret,
+    );
+
+    if (!decoded) {
+      throw new AppError('Invalid token', 401);
+    }
+
+    userExists.password = password;
+    userExists.resetToken = undefined;
+
+    await userExists.save();
+
+    const token = generateToken(
+      { _id: userExists._id, email: userExists.email },
+      { expiresIn: config.ACCESS_TOKEN_TIME },
+    );
+
+    const refreshToken = generateToken(
+      { _id: userExists._id, email: userExists.email },
+      { expiresIn: config.REFRESH_TOKEN_TIME },
+    );
+
+    userExists.refreshToken = refreshToken;
+    await userExists.save();
+
+    const {
+      password: userPassword,
+      refreshToken: userRefreshToken,
+      resetToken: userResetToken,
+      ...user
+    } = userExists.toObject();
+
+    return res
+      .status(200)
+      .cookie('refreshToken', refreshToken, {
+        httpOnly: true,
+        sameSite: 'strict',
+      })
+      .json({ success: true, token, user });
+  } catch (error: any) {
+    if (error instanceof AppError) {
+      return res
+        .status(error.statusCode)
+        .json({ success: false, message: error.message });
+    }
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Internal Server Error',
+    });
   }
 };

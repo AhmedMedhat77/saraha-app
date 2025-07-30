@@ -4,8 +4,9 @@ import config from '../../config';
 const generateToken = (
   payload: string | object | Buffer,
   options?: SignOptions,
+  tokenSecret?: string,
 ): string => {
-  const token = jwt.sign(payload, config.tokenSecret, {
+  const token = jwt.sign(payload, tokenSecret || config.tokenSecret, {
     ...options,
   });
   return token;
@@ -13,6 +14,7 @@ const generateToken = (
 
 const verifyToken = async (
   token: string,
+  tokenSecret?: string,
 ): Promise<
   | JwtPayload
   | string
@@ -20,7 +22,7 @@ const verifyToken = async (
   | { user: { _id: string; email?: string; phone?: string } }
 > => {
   try {
-    const decoded = jwt.verify(token, config.tokenSecret);
+    const decoded = jwt.verify(token, tokenSecret || config.tokenSecret);
     return decoded;
   } catch (error) {
     return null;

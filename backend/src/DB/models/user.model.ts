@@ -16,6 +16,7 @@ interface IUser extends Document {
   fullName?: string;
   age?: number;
   refreshToken?: string;
+  resetToken?: string;
 }
 
 const schema = new Schema<IUser>(
@@ -102,6 +103,10 @@ const schema = new Schema<IUser>(
     },
     dob: {
       type: Date,
+      default: null,
+    },
+    resetToken: {
+      type: String,
       default: null,
     },
   },

@@ -8,4 +8,7 @@ router.post('/verifyAccount', authService.verifyAccount);
 router.post('/resendOTP', authService.resendOTP);
 router.post('/login', authService.login);
 
+router.put('/forgetPassword', authService.forgetPassword);
+router.put('/resetPassword', authService.resetPassword);
+
 export default router;
