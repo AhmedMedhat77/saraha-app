@@ -1,4 +1,3 @@
-import { errorHandler } from './middleware/error/errorHandler';
 import config from './config';
 
 import { Express, json } from 'express';
@@ -13,7 +12,6 @@ export default function bootstrap(app: Express): void {
   // Initialize middleware
   app.use(cors({ origin: '*' }));
   app.use(json());
-  app.use(errorHandler);
 
   app.use('/', authRouter);
 
