@@ -16,6 +16,7 @@
 [*] hash password 
 [*] Forget password
 [*] Reset password
+[*] Delete profile 
 
 
 
@@ -29,7 +30,6 @@
 [x] global error handler (Partially done)
 [x] async handler 
 
-[x] Delete profile 
 [x] get profile 
 [x] update profile 
 [x] upload profile image
