@@ -2,6 +2,7 @@ import { createRootRoute, Outlet, useRouter } from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { useAuth } from "@/hooks/useAuth";
+import { GoogleOAuthProvider } from "@react-oauth/google";
 
 // Auth layout - shows only auth-related routes
 function AuthLayout() {
@@ -54,10 +55,12 @@ function AppLayout() {
 // Root component that wraps everything with AuthProvider
 export const Route = createRootRoute({
   component: () => (
-    <AuthProvider>
-      <RootComponent />
-      <TanStackRouterDevtools />
-    </AuthProvider>
+    <GoogleOAuthProvider clientId={import.meta.env.VITE_GOOGLE_CLIENT_ID || "YOUR SECRET KEY "}>
+      <AuthProvider>
+        <RootComponent />
+        <TanStackRouterDevtools />
+      </AuthProvider>
+    </GoogleOAuthProvider>
   ),
 });
 

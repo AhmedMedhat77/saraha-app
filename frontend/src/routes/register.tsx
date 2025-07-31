@@ -3,12 +3,21 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { DatePicker } from "@/components/DatePicker";
+import { useGoogleLogin } from "@react-oauth/google";
 
 export const Route = createFileRoute("/register")({
   component: Register,
 });
 
 function Register() {
+  const handleGoogleSignup = useGoogleLogin({
+    onSuccess: (credentialResponse) => {
+      console.log("Credential response:", credentialResponse);
+    },
+    onError: (error) => {
+      console.error("Login error:", error);
+    },
+  });
   return (
     <div className="min-h-screen flex items-center justify-center bg-background text-foreground px-4">
       <Card className="w-full max-w-md shadow-lg border-muted">
@@ -33,7 +42,11 @@ function Register() {
             <div className="h-px flex-1 bg-border" />
           </div>
 
-          <Button variant="outline" className="mt-4 w-full flex items-center justify-center gap-2 ">
+          <Button
+            onClick={() => handleGoogleSignup()}
+            variant="outline"
+            className="mt-4 w-full flex items-center justify-center gap-2 "
+          >
             <img src="/google-icon.webp" alt="Google Icon" className="w-4 h-4" />
             Register with Google
           </Button>

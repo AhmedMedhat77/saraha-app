@@ -3,6 +3,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useAuth } from "@/hooks/useAuth";
+import { useGoogleLogin } from "@react-oauth/google";
 
 export const Route = createFileRoute("/login")({
   component: RouteComponent,
@@ -10,11 +11,20 @@ export const Route = createFileRoute("/login")({
 
 function RouteComponent() {
   const { login } = useAuth();
+  const handleGoogleLogin = useGoogleLogin({
+    onSuccess: (credentialResponse) => {
+      console.log("Credential response:", credentialResponse);
+      login();
+    },
+    onError: (error) => {
+      console.error("Login error:", error);
+    },
+  });
   const navigate = useNavigate();
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    // In a real app, you would validate credentials here
+    //for auth routing testing
     login();
 
     // Redirect to the original URL or home page
@@ -47,7 +57,11 @@ function RouteComponent() {
             <div className="h-px flex-1 bg-border" />
           </div>
 
-          <Button variant="outline" className="mt-4 w-full flex items-center justify-center gap-2 cursor-pointer">
+          <Button
+            onClick={() => handleGoogleLogin()}
+            variant="outline"
+            className="mt-4 w-full flex items-center justify-center gap-2 cursor-pointer"
+          >
             <img src="/google-icon.webp" alt="Google Icon" className="w-4 h-4" />
             Login with Google
           </Button>
