@@ -8,7 +8,6 @@ import bcrypt from 'bcrypt';
 import { generateToken, verifyToken } from '../../utils/token';
 import { OAuth2Client } from 'google-auth-library';
 import config from '../../config';
-import { errorHandler } from '../../middleware/error/errorHandler';
 /*
 #Steps 
 1. Validate the request body
@@ -25,7 +24,7 @@ import { errorHandler } from '../../middleware/error/errorHandler';
 
 */
 
-export const register = errorHandler(async (req: Request, res: Response) => {
+export const register = async (req: Request, res: Response) => {
   const { firstName, lastName, email, password, dob, phone, platform } =
     req.body;
 
@@ -110,72 +109,70 @@ export const register = errorHandler(async (req: Request, res: Response) => {
   return res
     .status(201)
     .json({ success: true, message: 'User registered. OTP sent to email.' });
-});
+};
 
-export const registerWithGoogle = errorHandler(
-  async (req: Request, res: Response) => {
-    const { idToken } = req.body;
+export const registerWithGoogle = async (req: Request, res: Response) => {
+  const { idToken } = req.body;
 
-    if (!idToken) {
-      throw new AppError('Google token is required', 400);
-    }
+  if (!idToken) {
+    throw new AppError('Google token is required', 400);
+  }
 
-    const oauth2Client = new OAuth2Client();
-    const ticket = await oauth2Client.verifyIdToken({
-      idToken,
-      audience: config.googleClientId,
-    });
-    const payload = ticket.getPayload();
-    if (!payload) {
-      throw new AppError('Invalid Google token', 401);
-    }
-    const { email, name, picture } = payload;
+  const oauth2Client = new OAuth2Client();
+  const ticket = await oauth2Client.verifyIdToken({
+    idToken,
+    audience: config.googleClientId,
+  });
+  const payload = ticket.getPayload();
+  if (!payload) {
+    throw new AppError('Invalid Google token', 401);
+  }
+  const { email, name, picture } = payload;
 
-    const userExists = await User.findOne({ email });
+  const userExists = await User.findOne({ email });
 
-    if (userExists) {
-      throw new AppError('User already exists', 409);
-    }
+  if (userExists) {
+    throw new AppError('User already exists', 409);
+  }
 
-    const newUser = new User({
-      email,
-      fullName: name,
-      avatar: picture,
-      platform: 'google',
-      googleId: payload.sub,
-      isVerified: true,
-    });
+  const newUser = new User({
+    email,
+    fullName: name,
+    avatar: picture,
+    platform: 'google',
+    googleId: payload.sub,
+    isVerified: true,
+  });
 
-    const newUserSaved = await newUser.save();
-    const token = generateToken(
-      {
-        _id: newUserSaved._id,
-        email: newUserSaved.email,
-        phone: newUserSaved.phone,
-      },
-      { expiresIn: config.ACCESS_TOKEN_TIME },
-    );
-    const refreshToken = generateToken(
-      {
-        _id: newUserSaved._id,
-        email: newUserSaved.email,
-        phone: newUserSaved.phone,
-      },
-      { expiresIn: config.REFRESH_TOKEN_TIME },
-    );
-    // Add refresh token to user
-    newUserSaved.refreshToken = refreshToken;
-    await newUserSaved.save();
+  const newUserSaved = await newUser.save();
+  const token = generateToken(
+    {
+      _id: newUserSaved._id,
+      email: newUserSaved.email,
+      phone: newUserSaved.phone,
+    },
+    { expiresIn: config.ACCESS_TOKEN_TIME },
+  );
+  const refreshToken = generateToken(
+    {
+      _id: newUserSaved._id,
+      email: newUserSaved.email,
+      phone: newUserSaved.phone,
+    },
+    { expiresIn: config.REFRESH_TOKEN_TIME },
+  );
+  // Add refresh token to user
+  newUserSaved.refreshToken = refreshToken;
+  await newUserSaved.save();
 
-    const {
-      password: userPassword,
-      refreshToken: userRefreshToken,
-      ...user
-    } = newUserSaved.toObject();
+  const {
+    password: userPassword,
+    refreshToken: userRefreshToken,
+    ...user
+  } = newUserSaved.toObject();
 
-    return res.status(200).json({ success: true, token, refreshToken, user });
-  },
-);
+  return res.status(200).json({ success: true, token, refreshToken, user });
+};
 
 /*
 1- get Email and OTP from req.body
@@ -186,47 +183,45 @@ export const registerWithGoogle = errorHandler(
 6- if user exists  verify account 
 */
 
-export const verifyAccount = errorHandler(
-  async (req: Request, res: Response) => {
-    const { email, otp } = req.body;
+export const verifyAccount = async (req: Request, res: Response) => {
+  const { email, otp } = req.body;
 
-    // 1- Validate input
-    if (!email || !otp) {
-      throw new AppError('Email and OTP are required', 400);
-    }
+  // 1- Validate input
+  if (!email || !otp) {
+    throw new AppError('Email and OTP are required', 400);
+  }
 
-    // 2- Find user
-    const user = await User.findOne({ email });
+  // 2- Find user
+  const user = await User.findOne({ email });
 
-    if (!user) {
-      throw new AppError('User not found', 404);
-    }
+  if (!user) {
+    throw new AppError('User not found', 404);
+  }
 
-    if (!user.otp || !user.otpExpiry) {
-      throw new AppError('No OTP associated with this user', 409);
-    }
+  if (!user.otp || !user.otpExpiry) {
+    throw new AppError('No OTP associated with this user', 409);
+  }
 
-    // 3- Check OTP match
-    if (user.otp !== otp) {
-      throw new AppError('Invalid OTP', 401);
-    }
+  // 3- Check OTP match
+  if (user.otp !== otp) {
+    throw new AppError('Invalid OTP', 401);
+  }
 
-    // 4- Check if OTP is expired
-    if (new Date(user.otpExpiry) < new Date()) {
-      throw new AppError('OTP has expired', 401);
-    }
+  // 4- Check if OTP is expired
+  if (new Date(user.otpExpiry) < new Date()) {
+    throw new AppError('OTP has expired', 401);
+  }
 
-    // 5- Verify user
-    user.isVerified = true;
-    user.otp = undefined;
-    user.otpExpiry = undefined;
-    await user.save();
+  // 5- Verify user
+  user.isVerified = true;
+  user.otp = undefined;
+  user.otpExpiry = undefined;
+  await user.save();
 
-    return res
-      .status(200)
-      .json({ success: true, message: 'User verified successfully' });
-  },
-);
+  return res
+    .status(200)
+    .json({ success: true, message: 'User verified successfully' });
+};
 
 /*
 1. get email from body 
@@ -235,7 +230,7 @@ export const verifyAccount = errorHandler(
 4. if user exists and isVerified is false → generate OTP and send email 
 
 */
-export const resendOTP = errorHandler(async (req: Request, res: Response) => {
+export const resendOTP = async (req: Request, res: Response) => {
   const { email } = req.body;
 
   if (!email) {
@@ -266,7 +261,7 @@ export const resendOTP = errorHandler(async (req: Request, res: Response) => {
   return res
     .status(200)
     .json({ success: true, message: 'OTP sent to your email.' });
-});
+};
 
 /*
 Login with email or phone or google 
@@ -280,7 +275,7 @@ Login with email or phone or google
 8- return token and refresh token 
 */
 
-export const login = errorHandler(async (req: Request, res: Response) => {
+export const login = async (req: Request, res: Response) => {
   const { email, phone, password, googleId } = req.body;
 
   const userExists = await User.findOne({ $or: [{ email }, { phone }] });
@@ -329,37 +324,35 @@ export const login = errorHandler(async (req: Request, res: Response) => {
       sameSite: 'strict',
     })
     .json({ token, user, success: true });
-});
+};
 
 // Refresh token
 
-export const refreshToken = errorHandler(
-  async (req: Request, res: Response) => {
-    const refreshToken = req.cookies['refreshToken'];
+export const refreshToken = async (req: Request, res: Response) => {
+  const refreshToken = req.cookies['refreshToken'];
 
-    if (!refreshToken) {
-      throw new AppError('Refresh token is required', 401);
-    }
+  if (!refreshToken) {
+    throw new AppError('Refresh token is required', 401);
+  }
 
-    const decoded = (await verifyToken(refreshToken)) as { _id: string };
+  const decoded = (await verifyToken(refreshToken)) as { _id: string };
 
-    const user = await User.findById(decoded._id);
+  const user = await User.findById(decoded._id);
 
-    const accessToken = generateToken(
-      { _id: decoded._id, email: user?.email, phone: user?.phone },
-      { expiresIn: config.ACCESS_TOKEN_TIME },
-    );
+  const accessToken = generateToken(
+    { _id: decoded._id, email: user?.email, phone: user?.phone },
+    { expiresIn: config.ACCESS_TOKEN_TIME },
+  );
 
-    return res
-      .status(201)
-      .header('Authorization', `Bearer ${accessToken}`)
-      .json({
-        user: { _id: decoded._id },
-        success: true,
-        message: 'Refresh token generated successfully',
-      });
-  },
-);
+  return res
+    .status(201)
+    .header('Authorization', `Bearer ${accessToken}`)
+    .json({
+      user: { _id: decoded._id },
+      success: true,
+      message: 'Refresh token generated successfully',
+    });
+};
 
 /*
 1. get email from body 
@@ -372,42 +365,40 @@ export const refreshToken = errorHandler(
 8. update password 
 */
 
-export const forgetPassword = errorHandler(
-  async (req: Request, res: Response) => {
-    const { email } = req.body;
+export const forgetPassword = async (req: Request, res: Response) => {
+  const { email } = req.body;
 
-    if (!email) {
-      throw new AppError('Email is required', 400);
-    }
+  if (!email) {
+    throw new AppError('Email is required', 400);
+  }
 
-    const user = await User.findOne({ email });
+  const user = await User.findOne({ email });
 
-    if (!user) {
-      throw new AppError('User not found', 404);
-    }
+  if (!user) {
+    throw new AppError('User not found', 404);
+  }
 
-    const resetToken = generateToken(
-      { _id: user._id, email: user.email },
-      { expiresIn: config.RESET_TOKEN_TIME },
-      config.resetTokenSecret,
-    );
+  const resetToken = generateToken(
+    { _id: user._id, email: user.email },
+    { expiresIn: config.RESET_TOKEN_TIME },
+    config.resetTokenSecret,
+  );
 
-    const resetLink = `${config.clientURI}/${resetToken}`;
+  const resetLink = `${config.clientURI}/${resetToken}`;
 
-    user.resetToken = resetToken;
-    await user.save();
+  user.resetToken = resetToken;
+  await user.save();
 
-    await sendEmail({
-      to: user.email!,
-      subject: 'Reset Password',
-      text: `Click on the link to reset your password: ${resetLink}`,
-    });
+  await sendEmail({
+    to: user.email!,
+    subject: 'Reset Password',
+    text: `Click on the link to reset your password: ${resetLink}`,
+  });
 
-    return res
-      .status(200)
-      .json({ success: true, message: 'Reset link sent to your email.' });
-  },
-);
+  return res
+    .status(200)
+    .json({ success: true, message: 'Reset link sent to your email.' });
+};
 
 /*
 1. get email and password from req.body 
@@ -419,84 +410,80 @@ export const forgetPassword = errorHandler(
 7. return token and refresh token 
 */
 
-export const resetPassword = errorHandler(
-  async (req: Request, res: Response) => {
-    const { resetToken, password } = req.body;
+export const resetPassword = async (req: Request, res: Response) => {
+  const { resetToken, password } = req.body;
 
-    if (!resetToken || !password) {
-      throw new AppError('Reset Token and password are required', 400);
-    }
+  if (!resetToken || !password) {
+    throw new AppError('Reset Token and password are required', 400);
+  }
 
-    const userExists = await User.findOne({ resetToken });
+  const userExists = await User.findOne({ resetToken });
 
-    if (!userExists) {
-      throw new AppError('User not found', 404);
-    }
+  if (!userExists) {
+    throw new AppError('User not found', 404);
+  }
 
-    if (!userExists.resetToken) {
-      throw new AppError('user is not in reset mode', 409);
-    }
+  if (!userExists.resetToken) {
+    throw new AppError('user is not in reset mode', 409);
+  }
 
-    const decoded = await verifyToken(
-      userExists.resetToken!,
-      config.resetTokenSecret,
-    );
+  const decoded = await verifyToken(
+    userExists.resetToken!,
+    config.resetTokenSecret,
+  );
 
-    if (!decoded) {
-      throw new AppError('Invalid token', 401);
-    }
+  if (!decoded) {
+    throw new AppError('Invalid token', 401);
+  }
 
-    userExists.password = password;
-    userExists.resetToken = undefined;
+  userExists.password = password;
+  userExists.resetToken = undefined;
 
-    await userExists.save();
+  await userExists.save();
 
-    const token = generateToken(
-      { _id: userExists._id, email: userExists.email },
-      { expiresIn: config.ACCESS_TOKEN_TIME },
-    );
+  const token = generateToken(
+    { _id: userExists._id, email: userExists.email },
+    { expiresIn: config.ACCESS_TOKEN_TIME },
+  );
 
-    const refreshToken = generateToken(
-      { _id: userExists._id, email: userExists.email },
-      { expiresIn: config.REFRESH_TOKEN_TIME },
-    );
+  const refreshToken = generateToken(
+    { _id: userExists._id, email: userExists.email },
+    { expiresIn: config.REFRESH_TOKEN_TIME },
+  );
 
-    userExists.refreshToken = refreshToken;
-    await userExists.save();
+  userExists.refreshToken = refreshToken;
+  await userExists.save();
 
-    const {
-      password: userPassword,
-      refreshToken: userRefreshToken,
-      resetToken: userResetToken,
-      ...user
-    } = userExists.toObject();
+  const {
+    password: userPassword,
+    refreshToken: userRefreshToken,
+    resetToken: userResetToken,
+    ...user
+  } = userExists.toObject();
 
-    return res
-      .status(200)
-      .cookie('refreshToken', refreshToken, {
-        httpOnly: true,
-        sameSite: 'strict',
-      })
-      .json({ success: true, token, user });
-  },
-);
+  return res
+    .status(200)
+    .cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      sameSite: 'strict',
+    })
+    .json({ success: true, token, user });
+};
 
-export const deleteProfile = errorHandler(
-  async (req: Request, res: Response) => {
-    const { _id } = req.user!;
+export const deleteProfile = async (req: Request, res: Response) => {
+  const { _id } = req.user!;
 
-    if (!_id) {
-      throw new AppError('User not authenticated or invalid user data', 401);
-    }
+  if (!_id) {
+    throw new AppError('User not authenticated or invalid user data', 401);
+  }
 
-    const userExists = await User.findOne({ _id });
+  const userExists = await User.findOne({ _id });
 
-    if (!userExists) {
-      throw new AppError('User not found', 404);
-    }
+  if (!userExists) {
+    throw new AppError('User not found', 404);
+  }
 
-    await userExists.deleteOne();
+  await userExists.deleteOne();
 
-    return res.status(200).json({ success: true, message: 'User deleted' });
-  },
-);
+  return res.status(200).json({ success: true, message: 'User deleted' });
+};

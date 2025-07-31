@@ -17,8 +17,9 @@
 [*] Forget password
 [*] Reset password
 [*] Delete profile 
-
-
+[*] global error handler
+[*] async handler (already handled by express 5)
+[*] validation middleware
 
 [x] logout
 [x] destroy token 
@@ -27,8 +28,7 @@
 
  
 
-[x] global error handler (Partially done)
-[x] async handler 
+
 
 [x] get profile 
 [x] update profile 
