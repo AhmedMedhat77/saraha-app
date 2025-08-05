@@ -20,16 +20,20 @@
 [*] global error handler
 [*] async handler (already handled by express 5)
 [*] validation middleware
+[*] upload profile image
+
+
+Doing: 
+
+
+
+
 
 [x] logout
 [x] destroy token 
 
 [x] add login logic with google
 
- 
-
-
-
 [x] get profile 
 [x] update profile 
-[x] upload profile image
+

@@ -4,6 +4,7 @@ import { Express, json } from 'express';
 import cors from 'cors';
 import { connectDB } from './DB/connect';
 import authRouter from './models/auth/auth.controller';
+import userRouter from './models/user/user.controller';
 import { NextFunction, Request, Response } from 'express';
 
 export default function bootstrap(app: Express): void {
@@ -15,6 +16,7 @@ export default function bootstrap(app: Express): void {
   app.use(json());
 
   app.use('/', authRouter);
+  app.use('/user', userRouter);
 
   // Global error handler
   app.use((err: any, req: Request, res: Response, next: NextFunction) => {

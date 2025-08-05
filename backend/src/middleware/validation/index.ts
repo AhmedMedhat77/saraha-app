@@ -6,11 +6,13 @@ import { AppError } from '../../utils/error/AppError';
 export const isValid = (schema: Joi.ObjectSchema) => {
   return (req: Request, res: Response, next: NextFunction) => {
     const { error } = schema.validate(req.body);
+
     if (error) {
       const errorDetails = error.details.map((detail) => detail.message);
       const messages = errorDetails.join(', ');
       throw new AppError(messages, 400);
     }
+    
     next();
   };
 };

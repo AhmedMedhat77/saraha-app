@@ -8,14 +8,18 @@ import { isValid } from '../../middleware/validation';
 
 const router = Router();
 
-router.post('/register', authService.register);
-router.post('/registerWithGoogle', authService.registerWithGoogle);
+router.post('/register', isValid(authValidations.registerSchema), authService.register);
+router.post(
+  '/registerWithGoogle',
+  isValid(authValidations.registerWithGoogleSchema),
+  authService.registerWithGoogle,
+);
 router.post('/verifyAccount', authService.verifyAccount);
 router.post('/resendOTP', authService.resendOTP);
 router.post('/login', isValid(authValidations.loginSchema), authService.login);
 
-router.put('/forgetPassword', authService.forgetPassword);
-router.put('/resetPassword', authService.resetPassword);
+router.put('/forgetPassword', isValid(authValidations.forgetPasswordSchema), authService.forgetPassword);
+router.put('/resetPassword', isValid(authValidations.resetPasswordSchema), authService.resetPassword);
 
 router.delete('/deleteProfile', authenticateToken, authService.deleteProfile);
 
