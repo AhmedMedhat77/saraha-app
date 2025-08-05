@@ -6,6 +6,7 @@ import { connectDB } from './DB/connect';
 import authRouter from './models/auth/auth.controller';
 import userRouter from './models/user/user.controller';
 import { NextFunction, Request, Response } from 'express';
+import cookieParser from 'cookie-parser';
 
 export default function bootstrap(app: Express): void {
   // Connect to database
@@ -14,6 +15,7 @@ export default function bootstrap(app: Express): void {
   // Initialize middleware
   app.use(cors({ origin: '*' }));
   app.use(json());
+  app.use(cookieParser());
 
   app.use('/', authRouter);
   app.use('/user', userRouter);

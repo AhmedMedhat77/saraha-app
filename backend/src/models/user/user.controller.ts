@@ -13,4 +13,8 @@ router.put(
   userServices.uploadImage,
 );
 
+// For test you can remove authenticateToken middle ware cause the token default is 15min you have to get new access token to use the api
+router.delete('/logout', authenticateToken, userServices.logout);
+router.put('/refreshToken', userServices.generateNewAccessToken);
+
 export default router;
