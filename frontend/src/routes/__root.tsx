@@ -1,8 +1,10 @@
-import { createRootRoute, Outlet, useRouter } from "@tanstack/react-router";
+import { createRootRoute, Outlet, useNavigate, useRouter } from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 import { GoogleOAuthProvider } from "@react-oauth/google";
 import { userStore } from "@/store/userStore";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { useEffect } from "react";
 
 const queryClient = new QueryClient();
 
@@ -35,15 +37,15 @@ function AppLayout() {
             </a>
           </div>
           <div className="flex items-center space-x-4">
-            <button
+            <Button
               onClick={() => {
                 logout();
                 router.navigate({ to: "/login" });
               }}
-              className="px-4 py-2 rounded-md text-sm font-medium text-foreground hover:bg-accent"
+              variant="outline"
             >
               Logout
-            </button>
+            </Button>
           </div>
         </div>
       </nav>
@@ -67,7 +69,15 @@ export const Route = createRootRoute({
 });
 
 function RootComponent() {
-  const { isLoggedIn } = userStore();
+  const { isLoggedIn, setIsLoggedIn } = userStore();
+  const navigate = useNavigate();
+  useEffect(() => {
+    const token = window.localStorage.getItem("token");
+    if (token) {
+      setIsLoggedIn(true);
+      navigate({ to: "/" });
+    }
+  }, [setIsLoggedIn, navigate]);
 
   if (isLoggedIn) {
     return <AppLayout />;
