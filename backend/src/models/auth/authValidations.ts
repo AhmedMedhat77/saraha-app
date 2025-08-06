@@ -9,11 +9,19 @@ export const loginSchema = Joi.object({
     'string.base': 'Invalid phone',
   }),
 
+  platform: Joi.string().valid('local', 'google').required().messages({
+    'string.empty': 'Platform is required',
+  }),
+
   password: Joi.string().required().min(6).messages({
     'string.empty': 'Password is required',
     'string.min': 'Password must be at least 6 characters long',
   }),
-}).or('email', 'phone');
+})
+  .or('email', 'phone')
+  .messages({
+    'object.missing': 'Either email or phone is required',
+  });
 
 export const registerWithGoogleSchema = Joi.object({
   tokenId: Joi.string().required().messages({

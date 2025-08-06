@@ -276,26 +276,27 @@ Login with email or phone or google
 */
 
 export const login = async (req: Request, res: Response) => {
-  const { email, phone, password, googleId } = req.body;
+  const { email, phone, password, googleId, platform } = req.body;
+
+  if (!email && !phone) {
+    throw new AppError('Email or phone is required', 400);
+  }
 
   const userExists = await User.findOne({ $or: [{ email }, { phone }] });
 
-  if (!userExists) {
-    throw new AppError('User not found', 404);
-  }
+    if (!userExists) {
+      throw new AppError('User not found', 404);
+    }
 
   if (!userExists.isVerified) {
     throw new AppError('User is not verified', 401);
   }
 
-  if (
-    userExists.platform === 'local' &&
-    !bcrypt.compare(password, userExists.password!)
-  ) {
+  if (platform === 'local' && !bcrypt.compare(password, userExists.password!)) {
     throw new AppError('Invalid password', 401);
   }
 
-  if (userExists.platform === 'google' && userExists.googleId !== googleId) {
+  if (platform === 'google' && userExists.googleId !== googleId) {
     throw new AppError('Invalid googleId', 401);
   }
 
