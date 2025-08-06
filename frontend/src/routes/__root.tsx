@@ -1,8 +1,10 @@
 import { createRootRoute, Outlet, useRouter } from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
-import { AuthProvider } from "@/contexts/AuthContext";
-import { useAuth } from "@/hooks/useAuth";
 import { GoogleOAuthProvider } from "@react-oauth/google";
+import { userStore } from "@/store/userStore";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+
+const queryClient = new QueryClient();
 
 // Auth layout - shows only auth-related routes
 function AuthLayout() {
@@ -15,10 +17,10 @@ function AuthLayout() {
 
 // Main app layout - shows protected routes
 function AppLayout() {
-  const { isAuthenticated, logout } = useAuth();
+  const { isLoggedIn, logout } = userStore();
   const router = useRouter();
 
-  if (!isAuthenticated) {
+  if (!isLoggedIn) {
     router.navigate({ to: "/login" });
     return null;
   }
@@ -56,18 +58,18 @@ function AppLayout() {
 export const Route = createRootRoute({
   component: () => (
     <GoogleOAuthProvider clientId={import.meta.env.VITE_GOOGLE_CLIENT_ID || "YOUR SECRET KEY "}>
-      <AuthProvider>
+      <QueryClientProvider client={queryClient}>
         <RootComponent />
         <TanStackRouterDevtools />
-      </AuthProvider>
+      </QueryClientProvider>
     </GoogleOAuthProvider>
   ),
 });
 
 function RootComponent() {
-  const { isAuthenticated } = useAuth();
+  const { isLoggedIn } = userStore();
 
-  if (isAuthenticated) {
+  if (isLoggedIn) {
     return <AppLayout />;
   }
 
