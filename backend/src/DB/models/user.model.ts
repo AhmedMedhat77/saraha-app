@@ -17,6 +17,7 @@ interface IUser extends Document {
   age?: number;
   refreshToken?: string;
   resetToken?: string;
+  isDeleted: boolean;
 }
 
 const schema = new Schema<IUser>(
@@ -108,6 +109,10 @@ const schema = new Schema<IUser>(
     resetToken: {
       type: String,
       default: null,
+    },
+    isDeleted: {
+      type: Boolean,
+      default: false,
     },
   },
   {

@@ -3,8 +3,8 @@ import config from './config';
 import { Express, json } from 'express';
 import cors from 'cors';
 import { connectDB } from './DB/connect';
-import authRouter from './models/auth/auth.controller';
-import userRouter from './models/user/user.controller';
+import authRouter from './modules/auth/auth.controller';
+import userRouter from './modules/user/user.controller';
 import { NextFunction, Request, Response } from 'express';
 import cookieParser from 'cookie-parser';
 

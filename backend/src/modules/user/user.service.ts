@@ -3,28 +3,55 @@ import { AppError } from '../../utils/error/AppError';
 import { User } from '../../DB/models/user.model';
 import { generateToken, verifyToken } from '../../utils/token';
 import config from '../../config';
+import fs from 'fs/promises';
+import path from 'path';
 
 export const uploadImage = async (req: Request, res: Response) => {
   const file = req.file;
-  const { _id } = req.user!;
-  console.log(file);
-  if (!_id) {
-    throw new AppError('User not authenticated or invalid user data', 401);
-  }
+  const { _id } = req.user;
+
   if (!file) {
     throw new AppError('No file uploaded', 400);
   }
 
-  const user = await User.findOneAndUpdate(
-    { _id },
-    { $set: { avatar: file.path } },
-  );
+  try {
+    // Find user and get old image path if exists
+    const user = await User.findById(_id);
+    if (!user) {
+      await fs.unlink(file.path).catch(console.error);
+      throw new AppError('User not found', 404);
+    }
 
-  if (!user) {
-    throw new AppError('User not found', 404);
+    // Delete old image if exists
+    if (user.avatar) {
+      const oldImagePath = path.join(process.cwd(), user.avatar);
+      try {
+        await fs.access(oldImagePath);
+        await fs.unlink(oldImagePath);
+      } catch (err) {
+        console.error('Error deleting old image:', err);
+        // Continue even if old image deletion fails
+      }
+    }
+
+    // Update user with new image path (relative to project root)
+    const relativePath = path.relative(process.cwd(), file.path);
+    user.avatar = relativePath;
+    await user.save();
+
+    return res.status(200).json({ success: true, user });
+  } catch (error) {
+    // Clean up the uploaded file in case of error
+    if (file?.path) {
+      await fs.unlink(file.path).catch(console.error);
+    }
+    
+    if (error instanceof AppError) {
+      throw error;
+    }
+    
+    throw new AppError('Error uploading image', 500);
   }
-
-  return res.status(200).json({ success: true, user });
 };
 
 export const logout = async (req: Request, res: Response) => {
@@ -72,8 +99,6 @@ export const generateNewAccessToken = async (req: Request, res: Response) => {
     { _id: user._id, email: user.email, phone: user.phone },
     { expiresIn: config.ACCESS_TOKEN_TIME },
   );
-
-  
 
   return res.status(200).json({ success: true, accessToken });
 };

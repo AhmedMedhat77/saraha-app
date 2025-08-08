@@ -8,6 +8,7 @@ import bcrypt from 'bcrypt';
 import { generateToken, verifyToken } from '../../utils/token';
 import { OAuth2Client } from 'google-auth-library';
 import config from '../../config';
+import { successResponse } from '../../utils/response';
 /*
 #Steps 
 1. Validate the request body
@@ -284,9 +285,9 @@ export const login = async (req: Request, res: Response) => {
 
   const userExists = await User.findOne({ $or: [{ email }, { phone }] });
 
-    if (!userExists) {
-      throw new AppError('User not found', 404);
-    }
+  if (!userExists) {
+    throw new AppError('User not found', 404);
+  }
 
   if (!userExists.isVerified) {
     throw new AppError('User is not verified', 401);
@@ -487,4 +488,51 @@ export const deleteProfile = async (req: Request, res: Response) => {
   await userExists.deleteOne();
 
   return res.status(200).json({ success: true, message: 'User deleted' });
+};
+
+/**
+ * reset password
+ *  verify token from request
+ * check for old password
+ * check if user exists
+ * if(userExists)  && not is deleted compare old password sent by user with password in DB
+ * change password
+ */
+
+export const changePassword = async (req: Request, res: Response) => {
+  const { _id } = req.user;
+  const { oldPassword, newPassword } = req.body;
+
+  const user = await User.findById(_id);
+  if (!user || user.isDeleted) {
+    throw new AppError('User not found', 404);
+  }
+
+  // Verify old password
+  const isMatch = await bcrypt.compare(oldPassword, user.password!);
+  if (!isMatch) {
+    throw new AppError('Old password is incorrect', 400);
+  }
+
+  // Prevent reusing the same password
+  const isSamePassword = await bcrypt.compare(newPassword, user.password!);
+  if (isSamePassword) {
+    throw new AppError(
+      'New password cannot be the same as the old password',
+      400,
+    );
+  }
+
+  // Hash the new password
+  const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+  // Update user
+  user.password = hashedPassword;
+  await user.save();
+
+  return successResponse(res, {
+    message: 'Password updated successfully',
+    statusCode: 200,
+    data: { _id: user._id, email: user.email },
+  });
 };

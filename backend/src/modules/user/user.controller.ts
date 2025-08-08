@@ -1,15 +1,20 @@
 import { Router } from 'express';
-import { uploadMulter } from '../../utils/multer';
+import { fileUpload } from '../../utils/multer';
 
 import * as userServices from './user.service';
 import { authenticateToken } from '../../middleware/token';
+import { fileValidationMiddleware } from '../../middleware/fileValidation/file.validation.middleware';
 
 const router = Router();
 
 router.put(
   '/upload-profile',
   authenticateToken,
-  uploadMulter().single('avatar'),
+  fileUpload({
+    allowedTypes: ['image/jpeg', 'image/png'],
+  }).single('avatar'),
+  // have to be after multer to get the file
+  fileValidationMiddleware(['image/jpeg', 'image/png']),
   userServices.uploadImage,
 );
 

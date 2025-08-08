@@ -69,3 +69,13 @@ export const registerSchema = Joi.object({
     'string.empty': 'Platform is required',
   }),
 }).or('email', 'phone');
+
+export const changePasswordValidation = Joi.object({
+  oldPassword: Joi.string().required().messages({
+    'string.empty': 'have to pass old password',
+  }),
+  newPassword: Joi.string().required().min(6).messages({
+    'string.empty': 'have to pass old password',
+    'string.min': 'Password must be at least 6 characters long',
+  }),
+});

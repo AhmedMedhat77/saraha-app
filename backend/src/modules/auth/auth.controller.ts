@@ -36,6 +36,13 @@ router.put(
   authService.resetPassword,
 );
 
+router.put(
+  '/changePassword',
+  isValid(authValidations.changePasswordValidation),
+  authenticateToken,
+  authService.changePassword,
+);
+
 router.delete('/deleteProfile', authenticateToken, authService.deleteProfile);
 
 export default router;

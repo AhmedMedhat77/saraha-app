@@ -1,36 +1,45 @@
 import { NextFunction, Request, Response } from 'express';
-import { verifyToken } from '../../utils/token';
-import { generateToken } from '../../utils/token';
+import { verifyToken, generateToken } from '../../utils/token';
 import config from '../../config';
 import { AppError } from '../../utils/error/AppError';
+
+interface TokenUser {
+  _id: string;
+  email?: string;
+  phone?: string;
+}
 
 export const authenticateToken = async (
   req: Request,
   res: Response,
   next: NextFunction,
 ) => {
-  const authHeader = req.headers['authorization'];
-  const accessToken = authHeader?.startsWith('Bearer ')
-    ? authHeader.split(' ')[1]
-    : null;
-  const refreshToken = req.cookies?.refreshToken;
-
-  if (!accessToken && !refreshToken) {
-    return res.status(401).send('Access denied. No token provided.');
-  }
-
   try {
-    // Try verifying access token first
-    if (accessToken) {
-      const decoded = await verifyToken(accessToken);
-      if (!decoded) {
-        throw new AppError('Invalid access token', 401);
-      }
-      req.user = decoded;
-      return next();
+    const authHeader = req.headers['authorization'];
+    const accessToken = authHeader?.startsWith('Bearer ')
+      ? authHeader.split(' ')[1]
+      : null;
+    const refreshToken = req.cookies?.refreshToken;
+
+    if (!accessToken && !refreshToken) {
+      return res.status(401).send('Access denied. No token provided.');
     }
-  } catch (accessError) {
-    // If access token is invalid or expired, try refresh
+
+    // 1️⃣ Try Access Token First
+    if (accessToken) {
+      try {
+        const decoded = await verifyToken(accessToken);
+        if (typeof decoded === 'string' || !decoded) {
+          throw new AppError('Invalid access token', 401);
+        }
+        req.user = decoded;
+        return next();
+      } catch (err) {
+        // fall through to refresh token logic
+      }
+    }
+
+    // 2️⃣ Fallback to Refresh Token
     if (!refreshToken) {
       return res
         .status(401)
@@ -40,46 +49,34 @@ export const authenticateToken = async (
     try {
       const decodedRefresh = await verifyToken(refreshToken);
 
-      if (!decodedRefresh || typeof decodedRefresh === 'string') {
+      if (typeof decodedRefresh === 'string' || !decodedRefresh) {
         return res.status(403).send('Invalid refresh token.');
       }
 
-      // Extract user from the decoded token
-      const user =
-        'user' in decodedRefresh ? decodedRefresh.user : decodedRefresh;
+      const user: TokenUser =
+        'user' in decodedRefresh
+          ? (decodedRefresh.user as TokenUser)
+          : (decodedRefresh as TokenUser);
 
-      // Define the expected user type from token
-      interface TokenUser {
-        _id: string;
-        email?: string;
-        phone?: string;
-      }
-
-      // Ensure we have a valid user object with _id
-      const tokenUser = user as TokenUser;
-      if (!tokenUser || typeof tokenUser !== 'object' || !tokenUser._id) {
+      if (!user._id) {
         return res.status(403).send('Invalid user data in refresh token.');
       }
 
-      // Create a properly typed user payload
-      const userPayload: TokenUser = {
-        _id: tokenUser._id,
-      };
-      
-      // Add optional fields if they exist
-      if ('email' in tokenUser) userPayload.email = tokenUser.email;
-      if ('phone' in tokenUser) userPayload.phone = tokenUser.phone;
-
+      // Generate a new access token
       const newAccessToken = generateToken(
-        { user: userPayload },
+        { user },
         { expiresIn: config.ACCESS_TOKEN_TIME },
       );
 
       res.setHeader('x-access-token', newAccessToken);
-      req.user = userPayload;
+      req.user = user;
+
       return next();
     } catch (refreshError) {
       return res.status(403).send('Invalid or expired refresh token.');
     }
+  } catch (err) {
+    // ✅ Ensure no hanging requests
+    return next(err);
   }
 };
