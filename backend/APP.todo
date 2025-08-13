@@ -1,3 +1,4 @@
+DONE:
 [*] project file structure
 [*] integrate with DB 
 [*] add register logic with email and phone
@@ -23,17 +24,17 @@
 [*] upload profile image
 [*] logout destroy refreshToken
 [*] regenerate access token 
+[*] upload image to cloud 
 
 Doing: 
-
-Doing: 
-
+[x] save refreshToken to db
 
 
 
+
+Todo:
 
 [x] destroy token 
-
 [x] add login logic with google
 [x] get profile 
 [x] update profile 

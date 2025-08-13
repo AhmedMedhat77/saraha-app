@@ -16,6 +16,9 @@ interface Config {
   RESET_TOKEN_TIME: StringValue;
   resetTokenSecret: string;
   clientURI: string;
+  cloudinaryCloudName: string;
+  cloudinaryApiKey: string;
+  cloudinaryApiSecret: string;
 }
 
 const config: Config = {
@@ -31,6 +34,9 @@ const config: Config = {
   REFRESH_TOKEN_TIME: '7d',
   resetTokenSecret: process.env.RESET_TOKEN_SECRET || '',
   clientURI: process.env.CLIENT_URI || '',
+  cloudinaryCloudName: process.env.CLOUDINARY_CLOUD_NAME || '',
+  cloudinaryApiKey: process.env.CLOUDINARY_API_KEY || '',
+  cloudinaryApiSecret: process.env.CLOUDINARY_API_SECRET || '',
 };
 
 export default config;

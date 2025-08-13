@@ -5,6 +5,8 @@ import { generateToken, verifyToken } from '../../utils/token';
 import config from '../../config';
 import fs from 'fs/promises';
 import path from 'path';
+import { successResponse } from '../../utils/response';
+import cloudinary from '../../utils/cloud/cloudinary.config';
 
 export const uploadImage = async (req: Request, res: Response) => {
   const file = req.file;
@@ -45,13 +47,58 @@ export const uploadImage = async (req: Request, res: Response) => {
     if (file?.path) {
       await fs.unlink(file.path).catch(console.error);
     }
-    
+
     if (error instanceof AppError) {
       throw error;
     }
-    
+
     throw new AppError('Error uploading image', 500);
   }
+};
+
+// upload image to cloud
+/*
+1- get image from req.file
+2- delete old one if exists (make file for first time only )
+2.1- if image exists always make image with same public_id 
+3- upload new one 
+*/
+
+export const uploadImageToCloud = async (req: Request, res: Response) => {
+  const file = req.file;
+  const { _id } = req.user;
+
+  if (!file) {
+    throw new AppError('No file uploaded', 400);
+  }
+  const user = await User.findById(_id);
+
+  if (!user) {
+    throw new AppError('User not found', 404);
+  }
+
+  let options: { folder?: string; public_id?: string } = {
+    folder: `saraha-app/user/${_id}/profilePic`,
+    public_id: user.cloudinaryAvatar?.public_id,
+  };
+
+  if (user.cloudinaryAvatar?.public_id) {
+    delete options.folder;
+  }
+  const result = await cloudinary.uploader.upload(file.path, options);
+
+  user.cloudinaryAvatar = {
+    public_id: result.public_id,
+    secure_url: result.secure_url,
+  };
+
+  await user.save();
+
+  successResponse(res, {
+    data: user,
+    statusCode: 200,
+    message: 'Image uploaded successfully',
+  });
 };
 
 export const logout = async (req: Request, res: Response) => {

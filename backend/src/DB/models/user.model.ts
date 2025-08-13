@@ -7,6 +7,10 @@ interface IUser extends Document {
   phone?: string;
   password?: string;
   avatar: string;
+  cloudinaryAvatar: {
+    public_id: string;
+    secure_url: string;
+  };
   otp?: string;
   otpExpiry?: Date;
   isVerified: boolean;
@@ -77,6 +81,12 @@ const schema = new Schema<IUser>(
     },
     avatar: {
       type: String,
+    },
+    cloudinaryAvatar: {
+      type: {
+        public_id: String,
+        secure_url: String,
+      },
     },
     otp: {
       type: String,
