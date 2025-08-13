@@ -21,6 +21,8 @@ interface IUser extends Document {
   age?: number;
   refreshToken?: string;
   resetToken?: string;
+  OtpBlockTime?: Date;
+  otpAttempts: number;
   isDeleted: boolean;
 }
 
@@ -123,6 +125,14 @@ const schema = new Schema<IUser>(
     isDeleted: {
       type: Boolean,
       default: false,
+    },
+    OtpBlockTime: {
+      type: Date,
+      default: null,
+    },
+    otpAttempts: {
+      type: Number,
+      default: 0,
     },
   },
   {

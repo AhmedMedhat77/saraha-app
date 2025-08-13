@@ -59,12 +59,14 @@ export const register = async (req: Request, res: Response) => {
     throw new AppError('User already exists', 409);
   }
 
-  const { otp, otpExpiry } = generateOTP(5);
+  const OTP_EXPIRY_TIME = 2 * 60 * 1000; // 2 mins;
+  const { otp, otpExpiry } = generateOTP(5, OTP_EXPIRY_TIME);
 
   if (existingUser && !existingUser.isVerified) {
     // 4.2 Update existing unverified user with new OTP
     existingUser.otp = otp;
     existingUser.otpExpiry = otpExpiry;
+
     await existingUser.save();
 
     // Send email if email is present
@@ -72,7 +74,7 @@ export const register = async (req: Request, res: Response) => {
       await sendEmail({
         to: existingUser.email,
         subject: 'OTP Verification',
-        text: `Your OTP is ${otp}`,
+        text: `Your OTP is ${otp} and it expires in ${OTP_EXPIRY_TIME / 60000} minutes`,
       });
     }
 
@@ -187,36 +189,53 @@ export const registerWithGoogle = async (req: Request, res: Response) => {
 export const verifyAccount = async (req: Request, res: Response) => {
   const { email, otp } = req.body;
 
-  // 1- Validate input
   if (!email || !otp) {
     throw new AppError('Email and OTP are required', 400);
   }
 
-  // 2- Find user
   const user = await User.findOne({ email });
-
-  if (!user) {
-    throw new AppError('User not found', 404);
-  }
+  if (!user) throw new AppError('User not found', 404);
 
   if (!user.otp || !user.otpExpiry) {
     throw new AppError('No OTP associated with this user', 409);
   }
 
-  // 3- Check OTP match
-  if (user.otp !== otp) {
-    throw new AppError('Invalid OTP', 401);
+  // 1. Check if user is currently banned
+  if (user.OtpBlockTime && new Date(user.OtpBlockTime) > new Date()) {
+    throw new AppError('Too many OTP attempts. Try again later.', 429);
   }
 
-  // 4- Check if OTP is expired
+  // 2. If ban expired, reset attempts
+  if (user.OtpBlockTime && new Date(user.OtpBlockTime) <= new Date()) {
+    user.otpAttempts = 0;
+    user.OtpBlockTime = undefined;
+  }
+
+  // 3. Check OTP expiry
   if (new Date(user.otpExpiry) < new Date()) {
     throw new AppError('OTP has expired', 401);
   }
 
-  // 5- Verify user
+  // 4. Check OTP match
+  if (user.otp !== otp) {
+    user.otpAttempts = (user.otpAttempts || 0) + 1;
+
+    // If reached 5 failed attempts → ban for 5 minutes
+    if (user.otpAttempts >= 5) {
+      user.OtpBlockTime = new Date(Date.now() + 5 * 60 * 1000);
+    }
+
+    await user.save();
+    throw new AppError('Invalid OTP', 401);
+  }
+
+  // 5. OTP is correct → verify user
   user.isVerified = true;
+  user.otpAttempts = 0;
   user.otp = undefined;
   user.otpExpiry = undefined;
+  user.OtpBlockTime = undefined;
+
   await user.save();
 
   return res
