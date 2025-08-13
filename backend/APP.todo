@@ -25,9 +25,12 @@ DONE:
 [*] logout destroy refreshToken
 [*] regenerate access token 
 [*] upload image to cloud 
+[*] save refreshToken to db
+[*] token 5 times attempt
+[*] block user for 5 minutes for to many attempts
+[*] add login logic with google
 
 Doing: 
-[x] save refreshToken to db
 
 
 
@@ -35,7 +38,6 @@ Doing:
 Todo:
 
 [x] destroy token 
-[x] add login logic with google
 [x] get profile 
 [x] update profile 
 

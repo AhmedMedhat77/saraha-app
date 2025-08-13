@@ -4,11 +4,12 @@ import { User } from '../../DB/models/user.model';
 import { generateOTP } from '../../utils/otp';
 import { sendEmail } from '../../utils/email';
 import { body } from 'express-validator';
-import bcrypt from 'bcrypt';
 import { generateToken, verifyToken } from '../../utils/token';
 import { OAuth2Client } from 'google-auth-library';
 import config from '../../config';
 import { successResponse } from '../../utils/response';
+import { comparePassword, hashPassword } from '../../utils/hash';
+import cloudinary from '../../utils/cloud/cloudinary.config';
 /*
 #Steps 
 1. Validate the request body
@@ -84,7 +85,7 @@ export const register = async (req: Request, res: Response) => {
   // 4.2 If user does not exist → create new one
   let hashedPassword;
   if (!isGooglePlatform) {
-    hashedPassword = await bcrypt.hash(password, 10);
+    hashedPassword = await hashPassword(password);
   }
   const newUser = new User({
     firstName,
@@ -116,10 +117,6 @@ export const register = async (req: Request, res: Response) => {
 
 export const registerWithGoogle = async (req: Request, res: Response) => {
   const { idToken } = req.body;
-
-  if (!idToken) {
-    throw new AppError('Google token is required', 400);
-  }
 
   const oauth2Client = new OAuth2Client();
   const ticket = await oauth2Client.verifyIdToken({
@@ -208,7 +205,7 @@ export const verifyAccount = async (req: Request, res: Response) => {
   // 2. If ban expired, reset attempts
   if (user.OtpBlockTime && new Date(user.OtpBlockTime) <= new Date()) {
     user.otpAttempts = 0;
-    user.OtpBlockTime = undefined;
+    user.OtpBlockTime = null;
   }
 
   // 3. Check OTP expiry
@@ -218,7 +215,7 @@ export const verifyAccount = async (req: Request, res: Response) => {
 
   // 4. Check OTP match
   if (user.otp !== otp) {
-    user.otpAttempts = (user.otpAttempts || 0) + 1;
+    user.otpAttempts = user.otpAttempts + 1;
 
     // If reached 5 failed attempts → ban for 5 minutes
     if (user.otpAttempts >= 5) {
@@ -234,7 +231,7 @@ export const verifyAccount = async (req: Request, res: Response) => {
   user.otpAttempts = 0;
   user.otp = undefined;
   user.otpExpiry = undefined;
-  user.OtpBlockTime = undefined;
+  user.OtpBlockTime = null;
 
   await user.save();
 
@@ -253,15 +250,28 @@ export const verifyAccount = async (req: Request, res: Response) => {
 export const resendOTP = async (req: Request, res: Response) => {
   const { email } = req.body;
 
-  if (!email) {
-    throw new AppError('Email is required', 400);
-  }
-
   const userExists = await User.findOne({ email });
 
   if (!userExists) {
     throw new AppError('User not found', 404);
   }
+
+  if (
+    userExists.OtpBlockTime &&
+    new Date(userExists.OtpBlockTime) > new Date()
+  ) {
+    throw new AppError('Too many OTP attempts. Try again later.', 429);
+  }
+
+  // 2. If ban expired, reset attempts
+  if (
+    userExists.OtpBlockTime &&
+    new Date(userExists.OtpBlockTime) <= new Date()
+  ) {
+    userExists.otpAttempts = 0;
+    userExists.OtpBlockTime = null;
+  }
+
   if (userExists && userExists.isVerified) {
     throw new AppError('User is already verified', 409);
   }
@@ -311,8 +321,8 @@ export const login = async (req: Request, res: Response) => {
   if (!userExists.isVerified) {
     throw new AppError('User is not verified', 401);
   }
-
-  if (platform === 'local' && !bcrypt.compare(password, userExists.password!)) {
+  const isSamePassword = await comparePassword(password, userExists.password!);
+  if (platform === 'local' && !isSamePassword) {
     throw new AppError('Invalid password', 401);
   }
 
@@ -347,6 +357,61 @@ export const login = async (req: Request, res: Response) => {
     .json({ token, user, success: true });
 };
 
+export const loginWithGoogle = async (req: Request, res: Response) => {
+  const { idToken } = req.body;
+  const oauth2Client = new OAuth2Client();
+  const ticket = await oauth2Client.verifyIdToken({
+    idToken,
+    audience: config.googleClientId,
+  });
+  const payload = ticket.getPayload();
+  if (!payload) {
+    throw new AppError('Invalid Google token', 401);
+  }
+  const { email } = payload;
+
+  const userExists = await User.findOne({ email });
+
+  if (!userExists) {
+    throw new AppError('User not found', 404);
+  }
+  const token = generateToken(
+    {
+      _id: userExists._id,
+      email: userExists.email,
+      phone: userExists.phone,
+    },
+    { expiresIn: config.ACCESS_TOKEN_TIME },
+    config.tokenSecret,
+  );
+  const refreshToken = generateToken(
+    {
+      _id: userExists._id,
+      email: userExists.email,
+      phone: userExists.phone,
+    },
+    { expiresIn: config.REFRESH_TOKEN_TIME },
+    config.resetTokenSecret,
+  );
+
+  userExists.refreshToken = refreshToken;
+  await userExists.save();
+
+  const {
+    password: userPassword,
+    refreshToken: userRefreshToken,
+    ...user
+  } = userExists.toObject();
+
+  return res
+    .status(200)
+    .cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      sameSite: 'strict',
+    })
+    .json({ success: true, token, user });
+};
+
 // Refresh token
 
 export const refreshToken = async (req: Request, res: Response) => {
@@ -359,14 +424,25 @@ export const refreshToken = async (req: Request, res: Response) => {
   const decoded = (await verifyToken(refreshToken)) as { _id: string };
 
   const user = await User.findById(decoded._id);
+  if (!user) {
+    throw new AppError('User not found', 404);
+  }
+
+  const newRefreshToken = generateToken(
+    { _id: user._id, email: user.email, phone: user.phone },
+    { expiresIn: config.REFRESH_TOKEN_TIME },
+  );
 
   const accessToken = generateToken(
     { _id: decoded._id, email: user?.email, phone: user?.phone },
     { expiresIn: config.ACCESS_TOKEN_TIME },
   );
 
+  user.refreshToken = newRefreshToken;
+  user.save();
   return res
     .status(201)
+    .cookie('refreshToken', newRefreshToken)
     .header('Authorization', `Bearer ${accessToken}`)
     .json({
       user: { _id: decoded._id },
@@ -434,10 +510,6 @@ export const forgetPassword = async (req: Request, res: Response) => {
 export const resetPassword = async (req: Request, res: Response) => {
   const { resetToken, password } = req.body;
 
-  if (!resetToken || !password) {
-    throw new AppError('Reset Token and password are required', 400);
-  }
-
   const userExists = await User.findOne({ resetToken });
 
   if (!userExists) {
@@ -445,7 +517,7 @@ export const resetPassword = async (req: Request, res: Response) => {
   }
 
   if (!userExists.resetToken) {
-    throw new AppError('user is not in reset mode', 409);
+    throw new AppError('Invalid credentials', 409);
   }
 
   const decoded = await verifyToken(
@@ -456,9 +528,10 @@ export const resetPassword = async (req: Request, res: Response) => {
   if (!decoded) {
     throw new AppError('Invalid token', 401);
   }
-
-  userExists.password = password;
-  userExists.resetToken = undefined;
+  const hashedPassword = await hashPassword(password);
+  userExists.password = hashedPassword;
+  userExists.resetToken = null;
+  userExists.credentialsUpdatedAt = new Date();
 
   await userExists.save();
 
@@ -492,19 +565,16 @@ export const resetPassword = async (req: Request, res: Response) => {
 };
 
 export const deleteProfile = async (req: Request, res: Response) => {
-  const { _id } = req.user!;
+  const { _id } = req.user;
 
-  if (!_id) {
-    throw new AppError('User not authenticated or invalid user data', 401);
-  }
-
-  const userExists = await User.findOne({ _id });
+  const userExists = await User.deleteOne({ _id });
 
   if (!userExists) {
     throw new AppError('User not found', 404);
   }
-
-  await userExists.deleteOne();
+  await cloudinary.api.delete_resources_by_prefix(
+    `saraha-app/user/${_id}/profilePic`,
+  );
 
   return res.status(200).json({ success: true, message: 'User deleted' });
 };
@@ -528,13 +598,14 @@ export const changePassword = async (req: Request, res: Response) => {
   }
 
   // Verify old password
-  const isMatch = await bcrypt.compare(oldPassword, user.password!);
+
+  const isMatch = await comparePassword(oldPassword, user.password!);
   if (!isMatch) {
     throw new AppError('Old password is incorrect', 400);
   }
 
   // Prevent reusing the same password
-  const isSamePassword = await bcrypt.compare(newPassword, user.password!);
+  const isSamePassword = await comparePassword(newPassword, user.password!);
   if (isSamePassword) {
     throw new AppError(
       'New password cannot be the same as the old password',
@@ -543,10 +614,11 @@ export const changePassword = async (req: Request, res: Response) => {
   }
 
   // Hash the new password
-  const hashedPassword = await bcrypt.hash(newPassword, 10);
+  const hashedPassword = await hashPassword(newPassword);
 
   // Update user
   user.password = hashedPassword;
+  user.credentialsUpdatedAt = new Date();
   await user.save();
 
   return successResponse(res, {

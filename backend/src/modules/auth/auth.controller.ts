@@ -23,7 +23,11 @@ router.post(
 );
 
 router.post('/verifyAccount', authService.verifyAccount);
-router.post('/resendOTP', authService.resendOTP);
+router.post(
+  '/resendOTP',
+  isValid(authValidations.resendOTPSchema),
+  authService.resendOTP,
+);
 
 router.put(
   '/forgetPassword',

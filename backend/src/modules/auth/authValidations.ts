@@ -79,3 +79,9 @@ export const changePasswordValidation = Joi.object({
     'string.min': 'Password must be at least 6 characters long',
   }),
 });
+
+export const resendOTPSchema = Joi.object({
+  email: Joi.string().email().messages({
+    'string.email': 'Invalid email',
+  }),
+});

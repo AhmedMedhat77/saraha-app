@@ -105,10 +105,6 @@ export const logout = async (req: Request, res: Response) => {
   // Have to use cookeParser as middle ware in app controller
   const { refreshToken } = req.cookies;
 
-  if (!refreshToken) {
-    throw new AppError('Refresh token is required', 401);
-  }
-
   const decoded = await verifyToken(refreshToken);
 
   if (!decoded) {
@@ -120,6 +116,8 @@ export const logout = async (req: Request, res: Response) => {
   if (!user) {
     throw new AppError('User not found', 404);
   }
+
+  user.refreshToken = '';
 
   //  for now i use refresh token in cookie only not saved in DB
   // user.refreshToken = undefined;

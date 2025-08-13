@@ -3,8 +3,8 @@ import { model, Schema, Document } from 'mongoose';
 interface IUser extends Document {
   firstName: string;
   lastName: string;
-  email?: string;
-  phone?: string;
+  email: string;
+  phone: string;
   password?: string;
   avatar: string;
   cloudinaryAvatar: {
@@ -15,15 +15,16 @@ interface IUser extends Document {
   otpExpiry?: Date;
   isVerified: boolean;
   platform: 'local' | 'google';
-  dob?: Date;
+  dob: Date;
   googleId?: string;
   fullName?: string;
   age?: number;
-  refreshToken?: string;
-  resetToken?: string;
-  OtpBlockTime?: Date;
+  refreshToken: string | null;
+  resetToken: string | null;
+  OtpBlockTime: Date | null;
   otpAttempts: number;
   isDeleted: boolean;
+  credentialsUpdatedAt: Date | null;
 }
 
 const schema = new Schema<IUser>(
@@ -133,6 +134,10 @@ const schema = new Schema<IUser>(
     otpAttempts: {
       type: Number,
       default: 0,
+    },
+    credentialsUpdatedAt: {
+      type: Date,
+      default: null,
     },
   },
   {

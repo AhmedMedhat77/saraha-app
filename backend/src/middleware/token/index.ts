@@ -2,6 +2,7 @@ import { NextFunction, Request, Response } from 'express';
 import { verifyToken, generateToken } from '../../utils/token';
 import config from '../../config';
 import { AppError } from '../../utils/error/AppError';
+import { User } from '../../DB/models/user.model';
 
 interface TokenUser {
   _id: string;
@@ -27,16 +28,28 @@ export const authenticateToken = async (
 
     // 1️⃣ Try Access Token First
     if (accessToken) {
-      try {
-        const decoded = await verifyToken(accessToken);
-        if (typeof decoded === 'string' || !decoded) {
-          throw new AppError('Invalid access token', 401);
-        }
-        req.user = decoded;
-        return next();
-      } catch (err) {
-        // fall through to refresh token logic
+      const decoded = await verifyToken(accessToken);
+      if (typeof decoded === 'string' || !decoded) {
+        throw new AppError('Invalid access token', 401);
       }
+
+      const user = await User.findById(decoded._id);
+      // if user not found or deleted
+      if (!user || user.isDeleted) {
+        throw new AppError('User not found', 404);
+      }
+      // if user credentials updated after access token issued
+      if (
+        user.credentialsUpdatedAt &&
+        // time to mil seconds changed to date to validate probably
+        user.credentialsUpdatedAt > new Date(decoded.iat! * 1000)
+      ) {
+        throw new AppError('User credentials updated', 403);
+      }
+
+      req.user = { _id: user._id, email: user.email, phone: user.phone };
+
+      return next();
     }
 
     // 2️⃣ Fallback to Refresh Token
