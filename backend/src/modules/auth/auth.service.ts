@@ -319,6 +319,7 @@ export const login = async (req: Request, res: Response) => {
   if (platform === 'google' && userExists.googleId !== googleId) {
     throw new AppError('Invalid googleId', 401);
   }
+  
 
   const token = generateToken({ _id: userExists._id }, { expiresIn: '10m' });
   const refreshToken = generateToken(
@@ -359,14 +360,25 @@ export const refreshToken = async (req: Request, res: Response) => {
   const decoded = (await verifyToken(refreshToken)) as { _id: string };
 
   const user = await User.findById(decoded._id);
+  if(!user){
+    throw new AppError('User not found',404);
+  }
+
+
+  const newRefreshToken = generateToken(
+    { _id: user._id, email: user.email, phone: user.phone },
+    { expiresIn: config.REFRESH_TOKEN_TIME },
+  );
 
   const accessToken = generateToken(
     { _id: decoded._id, email: user?.email, phone: user?.phone },
     { expiresIn: config.ACCESS_TOKEN_TIME },
   );
 
+  user.refreshToken = newRefreshToken
+  user.save();
   return res
-    .status(201)
+    .status(201).cookie('refreshToken',newRefreshToken)
     .header('Authorization', `Bearer ${accessToken}`)
     .json({
       user: { _id: decoded._id },
