@@ -235,6 +235,10 @@ export const verifyAccount = async (req: Request, res: Response) => {
 
   await user.save();
 
+  // create folder to cloud to avoid error when delete account if  
+  cloudinary.api.create_folder(`saraha-app/user/${user._id}`);
+  
+
   return res
     .status(200)
     .json({ success: true, message: 'User verified successfully' });
@@ -573,8 +577,9 @@ export const deleteProfile = async (req: Request, res: Response) => {
   if (!userExists) {
     throw new AppError('User not found', 404);
   }
+  // Delete the whole folder 
   await cloudinary.api.delete_resources_by_prefix(
-    `saraha-app/user/${_id}/profilePic`,
+    `saraha-app/user/${_id}`,
   );
 
   return res.status(200).json({ success: true, message: 'User deleted' });

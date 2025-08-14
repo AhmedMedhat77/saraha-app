@@ -32,15 +32,17 @@ DONE:
 [*] token 5 times attempt
 [*] block user for 5 minutes for to many attempts
 [*] add login logic with google
+[*] delete user account
+[*] delete user folder from cloud
 
 Doing: 
+[x] destroy token 
 
 
 
 
 Todo:
 
-[x] destroy token 
 [x] get profile 
-[x] update profile 
-
+[x] logout from all devices or single device
+[x] update profile (firstName , lastName , dob , email , phoneNumber  )
