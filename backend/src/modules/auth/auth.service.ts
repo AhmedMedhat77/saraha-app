@@ -329,6 +329,7 @@ export const login = async (req: Request, res: Response) => {
   if (platform === 'google' && userExists.googleId !== googleId) {
     throw new AppError('Invalid googleId', 401);
   }
+  
 
   const token = generateToken({ _id: userExists._id }, { expiresIn: '10m' });
   const refreshToken = generateToken(
