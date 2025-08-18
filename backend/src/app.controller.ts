@@ -7,6 +7,7 @@ import authRouter from './modules/auth/auth.controller';
 import userRouter from './modules/user/user.controller';
 import { NextFunction, Request, Response } from 'express';
 import cookieParser from 'cookie-parser';
+import { globalErrorHandler } from './utils/error/globalErrorHandler';
 
 export default function bootstrap(app: Express): void {
   // Connect to database
@@ -21,12 +22,7 @@ export default function bootstrap(app: Express): void {
   app.use('/user', userRouter);
 
   // Global error handler
-  app.use((err: any, req: Request, res: Response, next: NextFunction) => {
-    res.status(err.statusCode || 500).json({
-      success: false,
-      message: err.message,
-    });
-  });
+  app.use(globalErrorHandler);
 
   // Start server
   app.listen(config.port, () => {

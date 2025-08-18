@@ -1,15 +1,22 @@
+// dependancies
 import { Request, Response } from 'express';
-import { AppError } from '../../utils/error/AppError';
+import { OAuth2Client } from 'google-auth-library';
+// 
+import { body } from 'express-validator';
+// Models
 import { User } from '../../DB/models/user.model';
+import { Token } from '../../DB/models/token.model';
+// utils
+import { AppError } from '../../utils/error/AppError';
 import { generateOTP } from '../../utils/otp';
 import { sendEmail } from '../../utils/email';
-import { body } from 'express-validator';
 import { generateToken, verifyToken } from '../../utils/token';
-import { OAuth2Client } from 'google-auth-library';
-import config from '../../config';
 import { successResponse } from '../../utils/response';
-import { comparePassword, hashPassword } from '../../utils/hash';
 import cloudinary from '../../utils/cloud/cloudinary.config';
+import { comparePassword, hashPassword } from '../../utils/hash';
+// constants
+import config from '../../config';
+
 /*
 #Steps 
 1. Validate the request body
@@ -235,9 +242,8 @@ export const verifyAccount = async (req: Request, res: Response) => {
 
   await user.save();
 
-  // create folder to cloud to avoid error when delete account if  
+  // create folder to cloud to avoid error when delete account if
   cloudinary.api.create_folder(`saraha-app/user/${user._id}`);
-  
 
   return res
     .status(200)
@@ -333,13 +339,18 @@ export const login = async (req: Request, res: Response) => {
   if (platform === 'google' && userExists.googleId !== googleId) {
     throw new AppError('Invalid googleId', 401);
   }
-  
 
-  const token = generateToken({ _id: userExists._id }, { expiresIn: '10m' });
+  const token = generateToken(
+    { _id: userExists._id },
+    { expiresIn: config.ACCESS_TOKEN_TIME },
+  );
   const refreshToken = generateToken(
     { _id: userExists._id, email: userExists.email, phone: userExists.phone },
     { expiresIn: config.REFRESH_TOKEN_TIME },
   );
+
+  // TODO create token in Token module 
+    await Token.create({ token: refreshToken, userId: userExists._id  , type:'refresh'});
 
   userExists.refreshToken = refreshToken;
   await userExists.save();
@@ -550,7 +561,14 @@ export const resetPassword = async (req: Request, res: Response) => {
     { expiresIn: config.REFRESH_TOKEN_TIME },
   );
 
+
+
   userExists.refreshToken = refreshToken;
+  userExists.credentialsUpdatedAt= new Date();
+  
+  await Token.deleteMany({userId:userExists._id});
+  await Token.create({ token: refreshToken, userId: userExists._id  , type:'refresh'});
+
   await userExists.save();
 
   const {
@@ -577,10 +595,8 @@ export const deleteProfile = async (req: Request, res: Response) => {
   if (!userExists) {
     throw new AppError('User not found', 404);
   }
-  // Delete the whole folder 
-  await cloudinary.api.delete_resources_by_prefix(
-    `saraha-app/user/${_id}`,
-  );
+  // Delete the whole folder
+  await cloudinary.api.delete_resources_by_prefix(`saraha-app/user/${_id}`);
 
   return res.status(200).json({ success: true, message: 'User deleted' });
 };
