@@ -3,6 +3,7 @@ import { verifyToken, generateToken } from '../../utils/token';
 import config from '../../config';
 import { AppError } from '../../utils/error/AppError';
 import { User } from '../../DB/models/user.model';
+import { Token } from '../../DB/models/token.model';
 
 interface TokenUser {
   _id: string;
@@ -32,7 +33,11 @@ export const authenticateToken = async (
       if (typeof decoded === 'string' || !decoded) {
         throw new AppError('Invalid access token', 401);
       }
-
+      const isBlocked = await Token.findOne({ token: accessToken ,type:'access'});
+      if (!isBlocked) {
+        throw new AppError('Access token not found', 401);
+      }
+      
       const user = await User.findById(decoded._id);
       // if user not found or deleted
       if (!user || user.isDeleted) {

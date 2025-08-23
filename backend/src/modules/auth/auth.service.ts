@@ -339,9 +339,11 @@ export const login = async (req: Request, res: Response) => {
   const refreshToken = generateToken({ _id: userExists._id, email: userExists.email, phone: userExists.phone },{ expiresIn: config.REFRESH_TOKEN_TIME });
 
   await Token.create({token: refreshToken,userId: userExists._id,type: 'refresh'});
+  await Token.create({token: token,userId: userExists._id,type: 'access'});
 
   userExists.refreshToken = refreshToken;
-  
+  userExists.isDeleted = false;
+
   await userExists.save();
 
   const {
@@ -374,6 +376,7 @@ export const loginWithGoogle = async (req: Request, res: Response) => {
   if (!userExists) {
     throw new AppError('User not found', 404);
   }
+  
   const token = generateToken(
     {
       _id: userExists._id,
@@ -394,6 +397,9 @@ export const loginWithGoogle = async (req: Request, res: Response) => {
   );
 
   userExists.refreshToken = refreshToken;
+  await Token.create({token: refreshToken,userId: userExists._id,type: 'refresh'});
+  userExists.isDeleted = false;
+
   await userExists.save();
 
   const {
@@ -533,9 +539,9 @@ export const resetPassword = async (req: Request, res: Response) => {
 
 export const deleteProfile = async (req: Request, res: Response) => {
   const { _id } = req.user;
-
-  const userExists = await User.deleteOne({ _id });
-
+// find user and log out from all devices (Soft Delete)
+  const userExists = await User.findOneAndUpdate({ _id }, { isDeleted: true, credentialsUpdatedAt:new Date() });
+  const tokens = await Token.deleteMany({user:_id});
   if (!userExists) {
     throw new AppError('User not found', 404);
   }

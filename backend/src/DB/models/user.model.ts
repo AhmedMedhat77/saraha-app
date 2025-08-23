@@ -127,6 +127,7 @@ const schema = new Schema<IUser>(
       type: Boolean,
       default: false,
     },
+
     OtpBlockTime: {
       type: Date,
       default: null,
