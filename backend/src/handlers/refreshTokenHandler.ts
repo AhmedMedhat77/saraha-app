@@ -5,12 +5,7 @@ import { User } from '../DB/models/user.model';
 import config from '../config';
 
 export const refreshTokenHandler = async (req: Request, res: Response) => {
-  const refreshToken = req.cookies?.refreshToken;
-  if (!refreshToken) {
-    return res
-      .status(401)
-      .json({ success: false, message: 'No refresh token provided' });
-  }
+  const refreshToken = req.headers['refreshtoken'] as string;
 
   // Verify token validity
   const decoded: any = await verifyToken(refreshToken).catch(() => null);
@@ -51,14 +46,10 @@ export const refreshTokenHandler = async (req: Request, res: Response) => {
   await User.updateOne({ _id: decoded._id }, { refreshToken: newRefreshToken });
 
   // Send response with new tokens
-  return res
-    .cookie('refreshToken', newRefreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-    })
-    .json({
-      success: true,
-      message: 'Token refreshed successfully',
-      accessToken,
-    });
+  return res.json({
+    success: true,
+    message: 'Token refreshed successfully',
+    accessToken,
+    refreshToken: newRefreshToken,
+  });
 };

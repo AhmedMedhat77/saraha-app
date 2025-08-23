@@ -8,7 +8,7 @@ export const globalErrorHandler = async (
   next: NextFunction,
 ) => {
   try {
-    refreshTokenHandler(req, res);
+    // refreshTokenHandler(req, res);
 
     if (err.message.includes('jwt expired')) {
       return res.status(401).json({

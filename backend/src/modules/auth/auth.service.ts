@@ -1,8 +1,7 @@
 // dependancies
 import { Request, Response } from 'express';
 import { OAuth2Client } from 'google-auth-library';
-// 
-import { body } from 'express-validator';
+//
 // Models
 import { User } from '../../DB/models/user.model';
 import { Token } from '../../DB/models/token.model';
@@ -50,11 +49,6 @@ export const register = async (req: Request, res: Response) => {
       'Password is required for Email or Phone registration',
       400,
     );
-  }
-
-  // 3. Validate email format (if present)
-  if (email && !body('email').isEmail()) {
-    throw new AppError('Invalid email format', 400);
   }
 
   // 4. Check if user with email or phone already exists
@@ -340,19 +334,14 @@ export const login = async (req: Request, res: Response) => {
     throw new AppError('Invalid googleId', 401);
   }
 
-  const token = generateToken(
-    { _id: userExists._id },
-    { expiresIn: config.ACCESS_TOKEN_TIME },
-  );
-  const refreshToken = generateToken(
-    { _id: userExists._id, email: userExists.email, phone: userExists.phone },
-    { expiresIn: config.REFRESH_TOKEN_TIME },
-  );
+  const token = generateToken({ _id: userExists._id },{ expiresIn: config.ACCESS_TOKEN_TIME });
 
-  // TODO create token in Token module 
-    await Token.create({ token: refreshToken, userId: userExists._id  , type:'refresh'});
+  const refreshToken = generateToken({ _id: userExists._id, email: userExists.email, phone: userExists.phone },{ expiresIn: config.REFRESH_TOKEN_TIME });
+
+  await Token.create({token: refreshToken,userId: userExists._id,type: 'refresh'});
 
   userExists.refreshToken = refreshToken;
+  
   await userExists.save();
 
   const {
@@ -364,13 +353,7 @@ export const login = async (req: Request, res: Response) => {
     ...user
   } = userExists.toObject();
 
-  return res
-    .status(200)
-    .cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      sameSite: 'strict',
-    })
-    .json({ token, user, success: true });
+  return res.status(200).json({ token, refreshToken, user, success: true });
 };
 
 export const loginWithGoogle = async (req: Request, res: Response) => {
@@ -429,7 +412,6 @@ export const loginWithGoogle = async (req: Request, res: Response) => {
 };
 
 // Refresh token
-
 export const refreshToken = async (req: Request, res: Response) => {
   const refreshToken = req.cookies['refreshToken'];
 
@@ -525,66 +507,28 @@ export const forgetPassword = async (req: Request, res: Response) => {
 
 export const resetPassword = async (req: Request, res: Response) => {
   const { resetToken, password } = req.body;
-
-  const userExists = await User.findOne({ resetToken });
-
-  if (!userExists) {
+  const decoded = await verifyToken(resetToken, config.resetTokenSecret);
+  if (!decoded || !decoded._id) {
+    throw new AppError('Invalid or expired reset token', 401);
+  }
+  const user = await User.findOne({ _id: decoded._id! });
+  if (!user) {
     throw new AppError('User not found', 404);
   }
 
-  if (!userExists.resetToken) {
-    throw new AppError('Invalid credentials', 409);
+  // 5. Check if token matches and is not already used
+  if (user.resetToken !== resetToken) {
+    throw new AppError('Invalid reset token', 401);
   }
+  // 7. Update password and clear reset token
+  user.password = await hashPassword(password);
+  user.credentialsUpdatedAt = new Date();
 
-  const decoded = await verifyToken(
-    userExists.resetToken!,
-    config.resetTokenSecret,
-  );
-
-  if (!decoded) {
-    throw new AppError('Invalid token', 401);
-  }
-  const hashedPassword = await hashPassword(password);
-  userExists.password = hashedPassword;
-  userExists.resetToken = null;
-  userExists.credentialsUpdatedAt = new Date();
-
-  await userExists.save();
-
-  const token = generateToken(
-    { _id: userExists._id, email: userExists.email },
-    { expiresIn: config.ACCESS_TOKEN_TIME },
-  );
-
-  const refreshToken = generateToken(
-    { _id: userExists._id, email: userExists.email },
-    { expiresIn: config.REFRESH_TOKEN_TIME },
-  );
-
-
-
-  userExists.refreshToken = refreshToken;
-  userExists.credentialsUpdatedAt= new Date();
-  
-  await Token.deleteMany({userId:userExists._id});
-  await Token.create({ token: refreshToken, userId: userExists._id  , type:'refresh'});
-
-  await userExists.save();
-
-  const {
-    password: userPassword,
-    refreshToken: userRefreshToken,
-    resetToken: userResetToken,
-    ...user
-  } = userExists.toObject();
-
-  return res
-    .status(200)
-    .cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      sameSite: 'strict',
-    })
-    .json({ success: true, token, user });
+  await user.save();
+  return res.status(200).json({
+    status: 'success',
+    message: 'Password has been reset successfully',
+  });
 };
 
 export const deleteProfile = async (req: Request, res: Response) => {

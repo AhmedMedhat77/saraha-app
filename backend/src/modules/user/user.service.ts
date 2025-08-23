@@ -6,7 +6,7 @@ import config from '../../config';
 import fs from 'fs/promises';
 import path from 'path';
 import { successResponse } from '../../utils/response';
-import cloudinary from '../../utils/cloud/cloudinary.config';
+import cloudinary, { defaultFolder } from '../../utils/cloud/cloudinary.config';
 
 export const uploadImage = async (req: Request, res: Response) => {
   const file = req.file;
@@ -78,7 +78,7 @@ export const uploadImageToCloud = async (req: Request, res: Response) => {
   }
 
   let options: { folder?: string; public_id?: string } = {
-    folder: `saraha-app/user/${_id}/profilePic`,
+    folder: defaultFolder(_id, 'profilePic'),
     public_id: user.cloudinaryAvatar?.public_id,
   };
 

@@ -142,8 +142,17 @@ const schema = new Schema<IUser>(
   },
   {
     timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
   },
 );
+
+// get messages of user
+schema.virtual('messages', {
+  ref: 'Message',
+  localField: '_id',
+  foreignField: 'receiver',
+});
 
 //  Ensure at least one of email or phone is present
 schema.pre('validate', function (next) {

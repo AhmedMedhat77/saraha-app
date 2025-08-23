@@ -34,15 +34,15 @@ DONE:
 [*] add login logic with google
 [*] delete user account
 [*] delete user folder from cloud
+[*] destroy token 
 
 Doing: 
-[x] destroy token 
+[x] get profile 
+[x] logout from all devices or single device
 
 
 
 
 Todo:
-
-[x] get profile 
-[x] logout from all devices or single device
 [x] update profile (firstName , lastName , dob , email , phoneNumber  )
+
