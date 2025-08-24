@@ -11,90 +11,138 @@ interface TokenUser {
   phone?: string;
 }
 
+// Extend Express Request type
+declare global {
+  namespace Express {
+    interface Request {
+      user: TokenUser;
+    }
+  }
+}
+
 export const authenticateToken = async (
   req: Request,
   res: Response,
   next: NextFunction,
 ) => {
   try {
-    const authHeader = req.headers['authorization'];
+    // === 1. Get Tokens ===
+    const authHeader = req.headers.authorization;
     const accessToken = authHeader?.startsWith('Bearer ')
       ? authHeader.split(' ')[1]
       : null;
-    const refreshToken = req.cookies?.refreshToken;
+
+    // Express lowercases all headers
+    const refreshToken =
+      (req.headers['refresh-token'] as string) ||
+      (req.headers['refreshtoken'] as string);
 
     if (!accessToken && !refreshToken) {
-      return res.status(401).send('Access denied. No token provided.');
-    }
-
-    // 1️⃣ Try Access Token First
-    if (accessToken) {
-      const decoded = await verifyToken(accessToken);
-      if (typeof decoded === 'string' || !decoded) {
-        throw new AppError('Invalid access token', 401);
-      }
-      const isBlocked = await Token.findOne({ token: accessToken ,type:'access'});
-      if (!isBlocked) {
-        throw new AppError('Access token not found', 401);
-      }
-      
-      const user = await User.findById(decoded._id);
-      // if user not found or deleted
-      if (!user || user.isDeleted) {
-        throw new AppError('User not found', 404);
-      }
-      // if user credentials updated after access token issued
-      if (
-        user.credentialsUpdatedAt &&
-        // time to mil seconds changed to date to validate probably
-        user.credentialsUpdatedAt > new Date(decoded.iat! * 1000)
-      ) {
-        throw new AppError('User credentials updated', 403);
-      }
-
-      req.user = { _id: user._id, email: user.email, phone: user.phone };
-
-      return next();
-    }
-
-    // 2️⃣ Fallback to Refresh Token
-    if (!refreshToken) {
-      return res
-        .status(401)
-        .send('Access token expired and no refresh token provided.');
-    }
-
-    try {
-      const decodedRefresh = await verifyToken(refreshToken);
-
-      if (typeof decodedRefresh === 'string' || !decodedRefresh) {
-        return res.status(403).send('Invalid refresh token.');
-      }
-
-      const user: TokenUser =
-        'user' in decodedRefresh
-          ? (decodedRefresh.user as TokenUser)
-          : (decodedRefresh as TokenUser);
-
-      if (!user._id) {
-        return res.status(403).send('Invalid user data in refresh token.');
-      }
-
-      // Generate a new access token
-      const newAccessToken = generateToken(
-        { user },
-        { expiresIn: config.ACCESS_TOKEN_TIME },
+      throw new AppError(
+        'Access denied. No authentication token provided.',
+        401,
       );
-
-      res.setHeader('x-access-token', newAccessToken);
-      req.user = user;
-
-      return next();
-    } catch (refreshError) {
-      return res.status(403).send('Invalid or expired refresh token.');
     }
-  } catch (err) {
-    // ✅ Ensure no hanging requests
-    return next(err);
+
+    // === 2. Validate Access Token ===
+    if (accessToken) {
+      try {
+        const decoded: any = await verifyToken(accessToken);
+
+        if (!decoded?._id) throw new AppError('Invalid access token', 401);
+
+        // Optional: If you store access tokens in DB, validate them
+        // const isTokenValid = await Token.exists({ token: accessToken, type: "access", blacklisted: false });
+        // if (!isTokenValid) throw new AppError("Access token invalidated", 401);
+
+        const user = await User.findById(decoded._id).select('-password');
+        if (!user || user.isDeleted)
+          throw new AppError('User not found or deleted', 404);
+
+        if (
+          user.credentialsUpdatedAt &&
+          decoded.iat &&
+          new Date(user.credentialsUpdatedAt).getTime() > decoded.iat * 1000
+        ) {
+          throw new AppError('Credentials updated, please log in again', 403);
+        }
+        if (!user._id) throw new AppError('User not found', 404);
+        // Attach user to request
+        req.user = {
+          _id: user._id.toString(),
+          email: user.email,
+          phone: user.phone,
+        };
+
+        return next();
+      } catch (e) {
+        // Continue to refresh token if access token expired
+      }
+    }
+
+    // === 3. Validate Refresh Token ===
+    if (!refreshToken) throw new AppError('No refresh token provided', 401);
+
+    const decodedRefresh: any = await verifyToken(refreshToken);
+    if (!decodedRefresh?._id) throw new AppError('Invalid refresh token', 401);
+
+    const isRefreshTokenValid = await Token.findOne({
+      token: refreshToken,
+      type: 'refresh',
+    });
+
+    if (!isRefreshTokenValid)
+      throw new AppError('Refresh token invalidated', 401);
+
+    const user = await User.findById(decodedRefresh._id).select('-password');
+    if (!user || user.isDeleted)
+      throw new AppError('User not found or deleted', 404);
+
+    // === 4. Generate new tokens ===
+    const newAccessToken = generateToken(
+      { _id: user._id, email: user.email, phone: user.phone },
+      { expiresIn: config.ACCESS_TOKEN_TIME },
+    );
+
+    const newRefreshToken = generateToken(
+      { _id: user._id, email: user.email, phone: user.phone },
+      { expiresIn: config.REFRESH_TOKEN_TIME },
+    );
+
+    // Replace old refresh tokens
+    await Token.deleteMany({
+      $or: [{ token: refreshToken }, { userId: user._id, type: 'refresh' }],
+    });
+
+    await Token.create({
+      token: accessToken,
+      userId: user._id,
+      type: 'access',
+    });
+    await Token.create({
+      token: newRefreshToken,
+      userId: user._id,
+      type: 'refresh',
+    });
+
+    if (!user._id) throw new AppError('User not found', 404);
+    // Attach user to request
+    req.user = {
+      _id: user._id.toString(),
+      email: user.email,
+      phone: user.phone,
+    };
+
+    // Send new tokens back in headers
+    res.setHeader('x-access-token', newAccessToken);
+    res.setHeader('x-refresh-token', newRefreshToken);
+
+    return next();
+  } catch (error) {
+    return next(
+      error instanceof AppError
+        ? error
+        : new AppError('Authentication failed', 401),
+    );
   }
 };
