@@ -1,28 +1,29 @@
-import { Request, Response } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import { generateToken, verifyToken } from '../utils/token';
 import { Token } from '../DB/models/token.model';
 import { User } from '../DB/models/user.model';
 import config from '../config';
 import { AppError } from '../utils/error/AppError';
 
-export const refreshTokenHandler = async (req: Request, res: Response) => {
-  const refreshToken =
-    (req.headers['refreshtoken'] as string) ||
-    (req.headers['refresh-token'] as string);
-
-  if (!refreshToken) {
-    return res.status(401).json({
-      success: false,
-      message: 'No refresh token provided',
-    });
-  }
-
+export const refreshTokenHandler = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
   try {
-    // Verify token validity
-    const decoded = await verifyToken(refreshToken);
+    const refreshToken =
+      (req.headers['x-refresh-token'] as string) ||
+      (req.headers['refresh-token'] as string) ||
+      (req.headers['refreshtoken'] as string);
 
+    if (!refreshToken) {
+      throw new AppError('No refresh token provided', 401);
+    }
+
+    // Verify token validity
+    const decoded: any = await verifyToken(refreshToken);
     if (!decoded || typeof decoded === 'string' || !decoded._id) {
-      throw new Error('Invalid refresh token');
+      throw new AppError('Invalid refresh token', 401);
     }
 
     // Ensure token exists in DB and is not blacklisted
@@ -33,18 +34,16 @@ export const refreshTokenHandler = async (req: Request, res: Response) => {
 
     if (!existingToken) {
       await Token.deleteMany({ token: refreshToken });
-      return res.status(401).json({
-        success: false,
-        message: 'Refresh token not found or invalidated',
-      });
+      throw new AppError('Refresh token not found or invalidated', 401);
     }
 
-    // Generate new tokens
+    // Find user
     const user = await User.findById(decoded._id);
     if (!user || user.isDeleted) {
       throw new AppError('User not found or account deleted', 404);
     }
 
+    // Generate new tokens
     const accessToken = generateToken(
       { _id: user._id, email: user.email, phone: user.phone },
       { expiresIn: config.ACCESS_TOKEN_TIME },
@@ -55,7 +54,7 @@ export const refreshTokenHandler = async (req: Request, res: Response) => {
       { expiresIn: config.REFRESH_TOKEN_TIME },
     );
 
-    // Update tokens in DB
+    // Replace old refresh tokens
     await Token.deleteMany({
       $or: [{ token: refreshToken }, { userId: user._id, type: 'refresh' }],
     });
@@ -66,8 +65,8 @@ export const refreshTokenHandler = async (req: Request, res: Response) => {
       type: 'refresh',
     });
 
-    // Send response
-    return res.json({
+    // Success response
+    return res.status(200).json({
       success: true,
       token: accessToken,
       refreshToken: newRefreshToken,
@@ -78,9 +77,10 @@ export const refreshTokenHandler = async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    return res.status(401).json({
-      success: false,
-      message: 'Invalid or expired refresh token',
-    });
+    next(
+      error instanceof AppError
+        ? error
+        : new AppError('Invalid or expired refresh token', 401),
+    );
   }
 };

@@ -35,7 +35,8 @@ export const authenticateToken = async (
     // Express lowercases all headers
     const refreshToken =
       (req.headers['refresh-token'] as string) ||
-      (req.headers['refreshtoken'] as string);
+      (req.headers['refreshtoken'] as string) ||
+      (req.headers['x-refresh-token'] as string);
 
     if (!accessToken && !refreshToken) {
       throw new AppError(
@@ -115,7 +116,7 @@ export const authenticateToken = async (
     });
 
     await Token.create({
-      token: accessToken,
+      token: newAccessToken, // Fix: Use newAccessToken instead of accessToken
       userId: user._id,
       type: 'access',
     });
@@ -133,9 +134,15 @@ export const authenticateToken = async (
       phone: user.phone,
     };
 
-    // Send new tokens back in headers
-    res.setHeader('x-access-token', newAccessToken);
-    res.setHeader('x-refresh-token', newRefreshToken);
+    // Send new tokens back in headers AND response body
+    res.setHeader('Authorization', `Bearer ${newAccessToken}`);
+    res.setHeader('refreshToken', newRefreshToken);
+
+    // Add this: Send tokens in response body for automatic token refresh
+    res.locals.newTokens = {
+      accessToken: newAccessToken,
+      refreshToken: newRefreshToken,
+    };
 
     return next();
   } catch (error) {

@@ -7,6 +7,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { successResponse } from '../../utils/response';
 import cloudinary, { defaultFolder } from '../../utils/cloud/cloudinary.config';
+import { Message } from '../../DB/models/message.model';
 
 export const uploadImage = async (req: Request, res: Response) => {
   const file = req.file;
@@ -103,7 +104,7 @@ export const uploadImageToCloud = async (req: Request, res: Response) => {
 
 export const logout = async (req: Request, res: Response) => {
   // Have to use cookeParser as middle ware in app controller
-  const { refreshToken } = req.cookies;
+  const refreshToken = req.headers['refreshtoken'] as string;
 
   const decoded = await verifyToken(refreshToken);
 
@@ -146,4 +147,26 @@ export const generateNewAccessToken = async (req: Request, res: Response) => {
   );
 
   return res.status(200).json({ success: true, accessToken });
+};
+
+export const getUserProfile = async (req: Request, res: Response) => {
+  const { _id } = req.user;
+
+  const user = await User.findById(_id).select(
+    '-password -refreshToken -credentialsUpdatedAt',
+  );
+
+  if (!user) {
+    throw new AppError('User not found', 404);
+  }
+
+  // Fetch messages where user is either sender or receiver
+  const messages = await Message.find({
+    $or: [{ sender: _id }, { receiver: _id }],
+  })
+    .populate('sender', 'firstName lastName email avatar')
+    .populate('receiver', 'firstName lastName email avatar')
+    .sort({ createdAt: -1 });
+
+  return res.status(200).json({ success: true, user, messages });
 };
