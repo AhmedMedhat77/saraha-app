@@ -1,11 +1,12 @@
-// dependancies
+// Dependencies
 import { Request, Response } from 'express';
 import { OAuth2Client } from 'google-auth-library';
-//
+
 // Models
 import { User } from '../../DB/models/user.model';
 import { Token } from '../../DB/models/token.model';
-// utils
+
+// Utils
 import { AppError } from '../../utils/error/AppError';
 import { generateOTP } from '../../utils/otp';
 import { sendEmail } from '../../utils/email';
@@ -13,81 +14,169 @@ import { generateToken, verifyToken } from '../../utils/token';
 import { successResponse } from '../../utils/response';
 import cloudinary from '../../utils/cloud/cloudinary.config';
 import { comparePassword, hashPassword } from '../../utils/hash';
-// constants
+
+// Constants
 import config from '../../config';
 
-/*
-#Steps 
-1. Validate the request body
+// Types
+interface AuthUser {
+  _id: string;
+  email?: string;
+  phone?: string;
+  firstName: string;
+  lastName: string;
+  platform: 'local' | 'google';
+  isVerified: boolean;
+}
 
-2. Check if the user already exists
-2.1 IF User exists and isVerified is true throw error 
-2.2 IF User exists and isVerified is false generate OTP and send email
-2.3 IF User does not exist create user and generate OTP and send email
+interface TokenResponse {
+  accessToken: string;
+  refreshToken: string;
+  user: Partial<AuthUser>;
+}
 
-3. User can Login with email or Phone 
-4. Send email 
-5. verify OTP 
-6. Register with google 
+// Constants
+const OTP_EXPIRY_TIME = 2 * 60 * 1000; // 2 minutes
+const MAX_OTP_ATTEMPTS = 5;
+const OTP_BLOCK_TIME = 5 * 60 * 1000; // 5 minutes
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOGIN_BLOCK_TIME = 15 * 60 * 1000; // 15 minutes
 
-*/
+/**
+ * Generate and store tokens for user
+ */
+const generateUserTokens = async (user: any): Promise<TokenResponse> => {
+  const accessToken = generateToken(
+    { _id: user._id },
+    { expiresIn: config.ACCESS_TOKEN_TIME },
+  );
 
+  const refreshToken = generateToken(
+    { _id: user._id, email: user.email, phone: user.phone },
+    { expiresIn: config.REFRESH_TOKEN_TIME },
+  );
+
+  // Store tokens in database
+  await Promise.all([
+    Token.create({
+      token: accessToken,
+      userId: user._id,
+      type: 'access',
+      expiresAt: new Date(Date.now() + 15 * 60 * 1000), // 15 minutes from now
+      deviceInfo: {
+        userAgent: 'unknown',
+        ip: 'unknown',
+        deviceId: 'unknown',
+      },
+    }),
+    Token.create({
+      token: refreshToken,
+      userId: user._id,
+      type: 'refresh',
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
+      deviceInfo: {
+        userAgent: 'unknown',
+        ip: 'unknown',
+        deviceId: 'unknown',
+      },
+    }),
+  ]);
+
+  // Update user's last login
+  user.lastLoginAt = new Date();
+  user.loginAttempts = 0;
+  user.isLocked = false;
+  user.lockedUntil = null;
+  await user.save();
+
+  const { password, otp, otpExpiry, resetToken, ...userResponse } =
+    user.toObject();
+
+  return {
+    accessToken,
+    refreshToken,
+    user: userResponse,
+  };
+};
+
+/**
+ * Check if user is blocked from OTP attempts
+ */
+const isUserBlocked = (user: any): boolean => {
+  if (!user.OtpBlockTime) return false;
+  return new Date(user.OtpBlockTime) > new Date();
+};
+
+/**
+ * Check if user is locked from login attempts
+ */
+const isUserLocked = (user: any): boolean => {
+  if (!user.isLocked || !user.lockedUntil) return false;
+  return new Date(user.lockedUntil) > new Date();
+};
+
+/**
+ * Block user for OTP attempts
+ */
+const blockUserOTP = async (user: any): Promise<void> => {
+  user.OtpBlockTime = new Date(Date.now() + OTP_BLOCK_TIME);
+  await user.save();
+};
+
+/**
+ * Lock user for login attempts
+ */
+const lockUser = async (user: any): Promise<void> => {
+  user.isLocked = true;
+  user.lockedUntil = new Date(Date.now() + LOGIN_BLOCK_TIME);
+  await user.save();
+};
+
+/**
+ * Register new user
+ */
 export const register = async (req: Request, res: Response) => {
   const { firstName, lastName, email, password, dob, phone, platform } =
     req.body;
 
-  // 1. Validate required fields
-  if (!firstName || !lastName || !dob || !platform) {
-    throw new AppError('All fields are required for registration', 400);
-  }
-
-  const isGooglePlatform = platform === 'google';
-
-  // 2. Validate password if not Google
-  if (!isGooglePlatform && !password) {
-    throw new AppError(
-      'Password is required for Email or Phone registration',
-      400,
-    );
-  }
-
-  // 4. Check if user with email or phone already exists
+  // Check if user already exists
   const existingUser = await User.findOne({
     $or: [...(email ? [{ email }] : []), ...(phone ? [{ phone }] : [])],
   });
 
-  // 4.1 If user exists and is verified → throw error
-  if (existingUser && existingUser.isVerified) {
-    throw new AppError('User already exists', 409);
+  if (existingUser?.isVerified) {
+    throw new AppError('User already exists and is verified', 409);
   }
 
-  const OTP_EXPIRY_TIME = 2 * 60 * 1000; // 2 mins;
-  const { otp, otpExpiry } = generateOTP(5, OTP_EXPIRY_TIME);
+  const { otp, otpExpiry } = generateOTP(6, OTP_EXPIRY_TIME);
 
   if (existingUser && !existingUser.isVerified) {
-    // 4.2 Update existing unverified user with new OTP
+    // Update existing unverified user
     existingUser.otp = otp;
     existingUser.otpExpiry = otpExpiry;
-
+    existingUser.otpAttempts = 0;
+    existingUser.OtpBlockTime = null;
     await existingUser.save();
 
-    // Send email if email is present
+    // Send OTP email
     if (existingUser.email) {
       await sendEmail({
         to: existingUser.email,
         subject: 'OTP Verification',
-        text: `Your OTP is ${otp} and it expires in ${OTP_EXPIRY_TIME / 60000} minutes`,
+        text: `Your OTP is ${otp} and expires in ${OTP_EXPIRY_TIME / 60000} minutes`,
       });
     }
 
-    return res.status(200).json({ message: 'OTP sent to your email.' });
+    return successResponse(res, {
+      message: 'OTP sent to your email',
+      statusCode: 200,
+    });
   }
 
-  // 4.2 If user does not exist → create new one
-  let hashedPassword;
-  if (!isGooglePlatform) {
-    hashedPassword = await hashPassword(password);
-  }
+  // Create new user
+  const hashedPassword =
+    platform === 'local' ? await hashPassword(password) : undefined;
+
   const newUser = new User({
     firstName,
     lastName,
@@ -102,20 +191,25 @@ export const register = async (req: Request, res: Response) => {
 
   await newUser.save();
 
-  // Send OTP if email is present
+  // Send OTP email
   if (newUser.email) {
     await sendEmail({
       to: newUser.email,
       subject: 'OTP Verification',
-      text: `Your OTP is ${otp}`,
+      text: `Your OTP is ${otp} and expires in ${OTP_EXPIRY_TIME / 60000} minutes`,
     });
   }
 
-  return res
-    .status(201)
-    .json({ success: true, message: 'User registered. OTP sent to email.' });
+  return successResponse(res, {
+    message: 'User registered successfully. OTP sent to email.',
+    statusCode: 201,
+    data: { userId: newUser._id },
+  });
 };
 
+/**
+ * Register with Google
+ */
 export const registerWithGoogle = async (req: Request, res: Response) => {
   const { idToken } = req.body;
 
@@ -124,110 +218,85 @@ export const registerWithGoogle = async (req: Request, res: Response) => {
     idToken,
     audience: config.googleClientId,
   });
+
   const payload = ticket.getPayload();
   if (!payload) {
     throw new AppError('Invalid Google token', 401);
   }
-  const { email, name, picture } = payload;
 
-  const userExists = await User.findOne({ email });
+  const { email, name, picture, sub: googleId } = payload;
 
-  if (userExists) {
+  // Check if user already exists
+  const existingUser = await User.findOne({ email });
+  if (existingUser) {
     throw new AppError('User already exists', 409);
   }
 
+  // Create new Google user
   const newUser = new User({
     email,
-    fullName: name,
+    firstName: name?.split(' ')[0] || 'Google',
+    lastName: name?.split(' ').slice(1).join(' ') || 'User',
     avatar: picture,
     platform: 'google',
-    googleId: payload.sub,
+    googleId,
     isVerified: true,
   });
 
-  const newUserSaved = await newUser.save();
-  const token = generateToken(
-    {
-      _id: newUserSaved._id,
-      email: newUserSaved.email,
-      phone: newUserSaved.phone,
-    },
-    { expiresIn: config.ACCESS_TOKEN_TIME },
-  );
-  const refreshToken = generateToken(
-    {
-      _id: newUserSaved._id,
-      email: newUserSaved.email,
-      phone: newUserSaved.phone,
-    },
-    { expiresIn: config.REFRESH_TOKEN_TIME },
-  );
-  // Add refresh token to user
-  newUserSaved.refreshToken = refreshToken;
-  await newUserSaved.save();
+  await newUser.save();
 
-  const {
-    password: userPassword,
-    refreshToken: userRefreshToken,
-    ...user
-  } = newUserSaved.toObject();
+  // Generate tokens
+  const tokens = await generateUserTokens(newUser);
 
-  return res.status(200).json({ success: true, token, refreshToken, user });
+  return successResponse(res, {
+    message: 'User registered successfully with Google',
+    statusCode: 201,
+    data: tokens,
+  });
 };
 
-/*
-1- get Email and OTP from req.body
-2- find user by email and check the OTP 
-3- if OTP is correct and not expired → update user isVerified to true
-4- if OTP is correct and expired → throw error
-5- if OTP is incorrect → throw error
-6- if user exists  verify account 
-*/
-
+/**
+ * Verify account with OTP
+ */
 export const verifyAccount = async (req: Request, res: Response) => {
   const { email, otp } = req.body;
 
-  if (!email || !otp) {
-    throw new AppError('Email and OTP are required', 400);
+  const user = await User.findOne({ email });
+  if (!user) {
+    throw new AppError('User not found', 404);
   }
 
-  const user = await User.findOne({ email });
-  if (!user) throw new AppError('User not found', 404);
+  if (user.isVerified) {
+    throw new AppError('User is already verified', 409);
+  }
 
   if (!user.otp || !user.otpExpiry) {
     throw new AppError('No OTP associated with this user', 409);
   }
 
-  // 1. Check if user is currently banned
-  if (user.OtpBlockTime && new Date(user.OtpBlockTime) > new Date()) {
+  // Check if user is blocked
+  if (isUserBlocked(user)) {
     throw new AppError('Too many OTP attempts. Try again later.', 429);
   }
 
-  // 2. If ban expired, reset attempts
-  if (user.OtpBlockTime && new Date(user.OtpBlockTime) <= new Date()) {
-    user.otpAttempts = 0;
-    user.OtpBlockTime = null;
-  }
-
-  // 3. Check OTP expiry
+  // Check OTP expiry
   if (new Date(user.otpExpiry) < new Date()) {
     throw new AppError('OTP has expired', 401);
   }
 
-  // 4. Check OTP match
+  // Check OTP match
   if (user.otp !== otp) {
-    user.otpAttempts = user.otpAttempts + 1;
+    user.otpAttempts += 1;
 
-    // If reached 5 failed attempts → ban for 5 minutes
-    if (user.otpAttempts >= 5) {
-      user.OtpBlockTime = new Date(Date.now() + 5 * 60 * 1000);
+    if (user.otpAttempts >= MAX_OTP_ATTEMPTS) {
+      await blockUserOTP(user);
     }
 
     await user.save();
     throw new AppError('Invalid OTP', 401);
   }
 
-  // 5. OTP is correct → verify user
+  // OTP is correct - verify user
   user.isVerified = true;
   user.otpAttempts = 0;
   user.otp = undefined;
@@ -236,199 +305,159 @@ export const verifyAccount = async (req: Request, res: Response) => {
 
   await user.save();
 
-  // create folder to cloud to avoid error when delete account if
-  cloudinary.api.create_folder(`saraha-app/user/${user._id}`);
+  // Create cloudinary folder
+  try {
+    await cloudinary.api.create_folder(`saraha-app/user/${user._id}`);
+  } catch (error) {
+    console.error('Failed to create cloudinary folder:', error);
+  }
 
-  return res
-    .status(200)
-    .json({ success: true, message: 'User verified successfully' });
+  return successResponse(res, {
+    message: 'User verified successfully',
+    statusCode: 200,
+  });
 };
 
-/*
-1. get email from body 
-2. check existence of email 
-3. if user exists and isVerified is true → throw error 
-4. if user exists and isVerified is false → generate OTP and send email 
-
-*/
+/**
+ * Resend OTP
+ */
 export const resendOTP = async (req: Request, res: Response) => {
   const { email } = req.body;
 
-  const userExists = await User.findOne({ email });
-
-  if (!userExists) {
+  const user = await User.findOne({ email });
+  if (!user) {
     throw new AppError('User not found', 404);
   }
 
-  if (
-    userExists.OtpBlockTime &&
-    new Date(userExists.OtpBlockTime) > new Date()
-  ) {
-    throw new AppError('Too many OTP attempts. Try again later.', 429);
-  }
-
-  // 2. If ban expired, reset attempts
-  if (
-    userExists.OtpBlockTime &&
-    new Date(userExists.OtpBlockTime) <= new Date()
-  ) {
-    userExists.otpAttempts = 0;
-    userExists.OtpBlockTime = null;
-  }
-
-  if (userExists && userExists.isVerified) {
+  if (user.isVerified) {
     throw new AppError('User is already verified', 409);
   }
 
-  const { otp, otpExpiry } = generateOTP(5);
+  // Check if user is blocked
+  if (isUserBlocked(user)) {
+    throw new AppError('Too many OTP attempts. Try again later.', 429);
+  }
 
-  userExists.otp = otp;
-  userExists.otpExpiry = otpExpiry;
-  await userExists.save();
+  // Generate new OTP
+  const { otp, otpExpiry } = generateOTP(6, OTP_EXPIRY_TIME);
 
+  user.otp = otp;
+  user.otpExpiry = otpExpiry;
+  user.otpAttempts = 0;
+  user.OtpBlockTime = null;
+  await user.save();
+
+  // Send OTP email
   await sendEmail({
-    to: userExists.email!,
+    to: user.email!,
     subject: 'OTP Verification',
-    text: `Your OTP is ${otp}`,
+    text: `Your new OTP is ${otp} and expires in ${OTP_EXPIRY_TIME / 60000} minutes`,
   });
 
-  return res
-    .status(200)
-    .json({ success: true, message: 'OTP sent to your email.' });
+  return successResponse(res, {
+    message: 'OTP sent to your email',
+    statusCode: 200,
+  });
 };
 
-/*
-Login with email or phone or google 
-1- get Email and OTP from req.body
-2- find the user by email or phone 
-3- check if user is verified 
-4- check the registration platform 
-5- if local compare password 
-6- if google compare googleId 
-7- generate token and refresh token 
-8- return token and refresh token 
-*/
-
+/**
+ * Login user
+ */
 export const login = async (req: Request, res: Response) => {
   const { email, phone, password, googleId, platform } = req.body;
 
-  const userExists = await User.findOne({ $or: [{ email }, { phone }] });
-
-  if (!userExists) {
-    throw new AppError('User not found', 404);
-  }
-
-  if (!userExists.isVerified) {
-    throw new AppError('User is not verified', 401);
-  }
-
-  const isSamePassword = await comparePassword(password, userExists.password!);
-  if (platform === 'local' && !isSamePassword) {
-    throw new AppError('Invalid password', 401);
-  }
-
-  if (platform === 'google' && userExists.googleId !== googleId) {
-    throw new AppError('Invalid googleId', 401);
-  }
-
-  const token = generateToken(
-    { _id: userExists._id },
-    { expiresIn: config.ACCESS_TOKEN_TIME },
-  );
-
-  const refreshToken = generateToken(
-    { _id: userExists._id, email: userExists.email, phone: userExists.phone },
-    { expiresIn: config.REFRESH_TOKEN_TIME },
-  );
-
-  await Token.create({
-    token: refreshToken,
-    userId: userExists._id,
-    type: 'refresh',
+  // Find user
+  const user = await User.findOne({
+    $or: [...(email ? [{ email }] : []), ...(phone ? [{ phone }] : [])],
   });
-  await Token.create({ token: token, userId: userExists._id, type: 'access' });
 
-  userExists.refreshToken = refreshToken;
-  userExists.isDeleted = false;
+  if (!user) {
+    throw new AppError('Invalid credentials', 401);
+  }
 
-  await userExists.save();
+  if (!user.isVerified) {
+    throw new AppError('Please verify your account first', 401);
+  }
 
-  const {
-    password: userPassword,
-    refreshToken: userRefreshToken,
-    otp,
-    otpExpiry,
-    googleId: userGoogleId,
-    ...user
-  } = userExists.toObject();
+  // Check if user is locked
+  if (isUserLocked(user)) {
+    throw new AppError('Account is temporarily locked. Try again later.', 429);
+  }
 
-  return res.status(200).json({ token, refreshToken, user, success: true });
+  // Validate credentials based on platform
+  if (platform === 'local') {
+    if (!user.password) {
+      throw new AppError('Invalid credentials', 401);
+    }
+
+    const isPasswordValid = await comparePassword(password, user.password);
+    if (!isPasswordValid) {
+      user.loginAttempts += 1;
+
+      if (user.loginAttempts >= MAX_LOGIN_ATTEMPTS) {
+        await lockUser(user);
+      }
+
+      await user.save();
+      throw new AppError('Invalid credentials', 401);
+    }
+  } else if (platform === 'google') {
+    if (user.googleId !== googleId) {
+      throw new AppError('Invalid Google credentials', 401);
+    }
+  }
+
+  // Generate tokens
+  const tokens = await generateUserTokens(user);
+
+  return successResponse(res, {
+    message: 'Login successful',
+    statusCode: 200,
+    data: tokens,
+  });
 };
 
+/**
+ * Login with Google
+ */
 export const loginWithGoogle = async (req: Request, res: Response) => {
   const { idToken } = req.body;
+
   const oauth2Client = new OAuth2Client();
   const ticket = await oauth2Client.verifyIdToken({
     idToken,
     audience: config.googleClientId,
   });
+
   const payload = ticket.getPayload();
   if (!payload) {
     throw new AppError('Invalid Google token', 401);
   }
-  const { email } = payload;
 
-  const userExists = await User.findOne({ email });
+  const { email, sub: googleId } = payload;
 
-  if (!userExists) {
-    throw new AppError('User not found', 404);
+  const user = await User.findOne({ email });
+  if (!user) {
+    throw new AppError('User not found. Please register first.', 404);
   }
 
-  const token = generateToken(
-    {
-      _id: userExists._id,
-      email: userExists.email,
-      phone: userExists.phone,
-    },
-    { expiresIn: config.ACCESS_TOKEN_TIME },
-    config.tokenSecret,
-  );
-  const refreshToken = generateToken(
-    {
-      _id: userExists._id,
-      email: userExists.email,
-      phone: userExists.phone,
-    },
-    { expiresIn: config.REFRESH_TOKEN_TIME },
-    config.resetTokenSecret,
-  );
+  if (!user.isVerified) {
+    throw new AppError('Please verify your account first', 401);
+  }
 
-  userExists.refreshToken = refreshToken;
-  await Token.create({
-    token: refreshToken,
-    userId: userExists._id,
-    type: 'refresh',
+  // Generate tokens
+  const tokens = await generateUserTokens(user);
+
+  return successResponse(res, {
+    message: 'Login successful',
+    statusCode: 200,
+    data: tokens,
   });
-  userExists.isDeleted = false;
-
-  await userExists.save();
-
-  const {
-    password: userPassword,
-    refreshToken: userRefreshToken,
-    ...user
-  } = userExists.toObject();
-
-  return res
-    .status(200)
-    .cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      sameSite: 'strict',
-    })
-    .json({ success: true, token, user });
 };
 
-// Refresh token
+/**
+ * Refresh access token
+ */
 export const refreshToken = async (req: Request, res: Response) => {
   const refreshToken = req.cookies['refreshToken'];
 
@@ -437,55 +466,32 @@ export const refreshToken = async (req: Request, res: Response) => {
   }
 
   const decoded = (await verifyToken(refreshToken)) as { _id: string };
+  if (!decoded?._id) {
+    throw new AppError('Invalid refresh token', 401);
+  }
 
   const user = await User.findById(decoded._id);
-  if (!user) {
+  if (!user || user.isDeleted) {
     throw new AppError('User not found', 404);
   }
 
-  const newRefreshToken = generateToken(
-    { _id: user._id, email: user.email, phone: user.phone },
-    { expiresIn: config.REFRESH_TOKEN_TIME },
-  );
+  // Generate new tokens
+  const tokens = await generateUserTokens(user);
 
-  const accessToken = generateToken(
-    { _id: decoded._id, email: user?.email, phone: user?.phone },
-    { expiresIn: config.ACCESS_TOKEN_TIME },
-  );
-
-  user.refreshToken = newRefreshToken;
-  user.save();
-  return res
-    .status(201)
-    .cookie('refreshToken', newRefreshToken)
-    .header('Authorization', `Bearer ${accessToken}`)
-    .json({
-      user: { _id: decoded._id },
-      success: true,
-      message: 'Refresh token generated successfully',
-    });
+  return successResponse(res, {
+    message: 'Token refreshed successfully',
+    statusCode: 200,
+    data: tokens,
+  });
 };
 
-/*
-1. get email from body 
-2. find user by email 
-3. generate new Token with different key than regular one 
-4. generate link carrying this token 
-5. send email with this link 
-6. if user clicks on link 
-7. verify token 
-8. update password 
-*/
-
+/**
+ * Forgot password
+ */
 export const forgetPassword = async (req: Request, res: Response) => {
   const { email } = req.body;
 
-  if (!email) {
-    throw new AppError('Email is required', 400);
-  }
-
   const user = await User.findOne({ email });
-
   if (!user) {
     throw new AppError('User not found', 404);
   }
@@ -496,7 +502,7 @@ export const forgetPassword = async (req: Request, res: Response) => {
     config.resetTokenSecret,
   );
 
-  const resetLink = `${config.clientURI}/${resetToken}`;
+  const resetLink = `${config.clientURI}/reset-password?token=${resetToken}`;
 
   user.resetToken = resetToken;
   await user.save();
@@ -507,74 +513,51 @@ export const forgetPassword = async (req: Request, res: Response) => {
     text: `Click on the link to reset your password: ${resetLink}`,
   });
 
-  return res
-    .status(200)
-    .json({ success: true, message: 'Reset link sent to your email.' });
-};
-
-/*
-1. get email and password from req.body 
-2. find user by email 
-3. verify the link with db Link 
-4. update password 
-5. remove resetLink from user 
-6. generate token and refresh token 
-7. return token and refresh token 
-*/
-
-export const resetPassword = async (req: Request, res: Response) => {
-  const { resetToken, password } = req.body;
-  const decoded = await verifyToken(resetToken, config.resetTokenSecret);
-  if (!decoded || !decoded._id) {
-    throw new AppError('Invalid or expired reset token', 401);
-  }
-  const user = await User.findOne({ _id: decoded._id! });
-  if (!user) {
-    throw new AppError('User not found', 404);
-  }
-
-  // 5. Check if token matches and is not already used
-  if (user.resetToken !== resetToken) {
-    throw new AppError('Invalid reset token', 401);
-  }
-  // 7. Update password and clear reset token
-  user.password = await hashPassword(password);
-  user.credentialsUpdatedAt = new Date();
-
-  await user.save();
-  return res.status(200).json({
-    status: 'success',
-    message: 'Password has been reset successfully',
+  return successResponse(res, {
+    message: 'Reset link sent to your email',
+    statusCode: 200,
   });
 };
 
-export const deleteProfile = async (req: Request, res: Response) => {
-  const { _id } = req.user;
-  // find user and log out from all devices (Soft Delete)
-  const userExists = await User.findOneAndUpdate(
-    { _id },
-    { isDeleted: true, credentialsUpdatedAt: new Date() },
-  );
-  const tokens = await Token.deleteMany({ user: _id });
-  if (!userExists) {
+/**
+ * Reset password
+ */
+export const resetPassword = async (req: Request, res: Response) => {
+  const { resetToken, password } = req.body;
+
+  const decoded = await verifyToken(resetToken, config.resetTokenSecret);
+  if (!decoded?._id) {
+    throw new AppError('Invalid or expired reset token', 401);
+  }
+
+  const user = await User.findById(decoded._id);
+  if (!user || user.isDeleted) {
     throw new AppError('User not found', 404);
   }
 
-  // Delete the whole folder
-  await cloudinary.api.delete_resources_by_prefix(`saraha-app/user/${_id}`);
+  if (user.resetToken !== resetToken) {
+    throw new AppError('Invalid reset token', 401);
+  }
 
-  return res.status(200).json({ success: true, message: 'User deleted' });
+  // Update password
+  user.password = await hashPassword(password);
+  user.credentialsUpdatedAt = new Date();
+  user.resetToken = undefined;
+
+  await user.save();
+
+  // Revoke all existing tokens
+  await Token.revokeUserTokens(user._id as string);
+
+  return successResponse(res, {
+    message: 'Password reset successfully',
+    statusCode: 200,
+  });
 };
 
 /**
- * reset password
- *  verify token from request
- * check for old password
- * check if user exists
- * if(userExists)  && not is deleted compare old password sent by user with password in DB
- * change password
+ * Change password
  */
-
 export const changePassword = async (req: Request, res: Response) => {
   const { _id } = req.user;
   const { oldPassword, newPassword } = req.body;
@@ -585,9 +568,8 @@ export const changePassword = async (req: Request, res: Response) => {
   }
 
   // Verify old password
-
-  const isMatch = await comparePassword(oldPassword, user.password!);
-  if (!isMatch) {
+  const isOldPasswordValid = await comparePassword(oldPassword, user.password!);
+  if (!isOldPasswordValid) {
     throw new AppError('Old password is incorrect', 400);
   }
 
@@ -600,17 +582,75 @@ export const changePassword = async (req: Request, res: Response) => {
     );
   }
 
-  // Hash the new password
-  const hashedPassword = await hashPassword(newPassword);
-
-  // Update user
-  user.password = hashedPassword;
+  // Update password
+  user.password = await hashPassword(newPassword);
   user.credentialsUpdatedAt = new Date();
   await user.save();
 
+  // Revoke all existing tokens
+  await Token.revokeUserTokens(user._id as string);
+
   return successResponse(res, {
-    message: 'Password updated successfully',
+    message: 'Password changed successfully',
     statusCode: 200,
     data: { _id: user._id, email: user.email },
+  });
+};
+
+/**
+ * Delete profile (soft delete)
+ */
+export const deleteProfile = async (req: Request, res: Response) => {
+  const { _id } = req.user;
+
+  const user = await User.findById(_id);
+  if (!user) {
+    throw new AppError('User not found', 404);
+  }
+
+  // Soft delete user
+  await user.softDelete();
+
+  // Revoke all tokens
+  await Token.revokeUserTokens(_id);
+
+  // Delete cloudinary resources
+  try {
+    await cloudinary.api.delete_resources_by_prefix(`saraha-app/user/${_id}`);
+  } catch (error) {
+    console.error('Failed to delete cloudinary resources:', error);
+  }
+
+  return successResponse(res, {
+    message: 'Profile deleted successfully',
+    statusCode: 200,
+  });
+};
+
+/**
+ * Logout user
+ */
+export const logout = async (req: Request, res: Response) => {
+  const { _id } = req.user;
+  const { allDevices = false } = req.body;
+
+  if (allDevices) {
+    // Logout from all devices
+    await Token.revokeUserTokens(_id);
+  } else {
+    // Logout from current device only
+    const authHeader = req.headers.authorization;
+    const accessToken = authHeader?.startsWith('Bearer ')
+      ? authHeader.split(' ')[1]
+      : null;
+
+    if (accessToken) {
+      await Token.blacklist(accessToken);
+    }
+  }
+
+  return successResponse(res, {
+    message: 'Logged out successfully',
+    statusCode: 200,
   });
 };

@@ -29,7 +29,7 @@ const config: Config = {
   emailUser: process.env.EMAIL_USER || '',
   emailPassword: process.env.EMAIL_PASSWORD || '',
   googleClientId: process.env.GOOGLE_AUTH_CLIENT || '',
-  ACCESS_TOKEN_TIME: '10m',
+  ACCESS_TOKEN_TIME: '15m', // Changed from '5m' to '15m' for better user experience
   RESET_TOKEN_TIME: '5m',
   REFRESH_TOKEN_TIME: '7d',
   resetTokenSecret: process.env.RESET_TOKEN_SECRET || '',

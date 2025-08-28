@@ -63,6 +63,7 @@ export const refreshTokenHandler = async (
       token: newRefreshToken,
       userId: user._id,
       type: 'refresh',
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
     });
 
     // Success response
